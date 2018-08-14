@@ -167,6 +167,80 @@ private static long GetInsightsExpandedTimes(string dataSource, DataTable extern
     return expandedCount;
 }
 
+private static string GetAllInsightsQuery(string detectorId, string timeRange)
+{
+    return
+    $@" customEvents 
+    | where timestamp > ago(7d) 
+    | sort by timestamp desc 
+    | where name contains 'LogInsights' and name contains '{detectorId}'
+    | take 1
+    | project insights = todynamic(customDimensions);
+    ";
+}
+
+
+private static Dictionary<string, string> GetAllInsightsMarkDownstring(string dataSource, DataTable internalInsightsMapping, DataTable externalInsightsMapping)
+{
+    Dictionary<string, string> result = new Dictionary<string, string>();
+    Dictionary<string, string> allMapping = new Dictionary<string, string>();
+    int criticalCount = 0;
+
+    if (dataSource == "1" && internalInsightsMapping.Rows.Count == 0 || dataSource == "2" && externalInsightsMapping.Rows.Count == 0 ||dataSource == "0" && internalInsightsMapping.Rows.Count == 0 && externalInsightsMapping.Rows.Count == 0)
+        return null;
+
+    if (dataSource != "2" && internalInsightsMapping.Rows.Count > 0)
+    {
+        var insightsList= internalInsightsMapping.Rows[0]["insights"];
+        
+        foreach (var c in insightsList.ToString().Split(new char[]{'{', '}', ','}, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] pair = c.Split(':', StringSplitOptions.RemoveEmptyEntries);
+            if (pair.Count() >= 1 && !allMapping.ContainsKey(pair[0]))
+            {
+                allMapping[pair[0]] = pair[1];
+                if (pair[1].Equals("Critical"))
+                    criticalCount++;
+            }
+        }
+    }
+
+    if (dataSource != "1" && externalInsightsMapping.Rows.Count > 0)
+    {
+        var insightsList= externalInsightsMapping.Rows[0]["insights"];
+        
+        foreach (var c in insightsList.ToString().Split(new char[]{'{', '}', ','}, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string[] pair = c.Split(':', StringSplitOptions.RemoveEmptyEntries);
+            if (pair.Count() >= 1 && !allMapping.ContainsKey(pair[0]))
+            {
+                allMapping[pair[0]] = pair[1];
+                if (pair[1].Equals("Critical"))
+                    criticalCount++;
+            }
+        }
+    }
+
+    var dicSort = from objDic in allMapping orderby objDic.Value ascending select objDic;
+    string markdown = @"<markdown>";
+
+
+    markdown += $@"
+    | Insights Title | Status|
+    | :---: | :---:|
+    ";
+
+    foreach (KeyValuePair<string, string> kvp in dicSort)
+    {
+        markdown += $@"| `{kvp.Key}` | {kvp.Value}|
+        ";
+    }
+    markdown += "</markdown>";
+    result.Add("markdown", markdown);
+    result.Add("critical", criticalCount.ToString());
+    return result;
+}
+
 [SystemFilter]
 [Definition(Id = "__analytics", Name = "Business analytics", Author = "xipeng,shgup", Description = "")]
 public async static Task<Response> Run(DataProviders dp, Dictionary<string, dynamic> cxt, Response res)
@@ -254,12 +328,34 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
     var internalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetCustomEventsQuery(detectorId, timeRange));
 
+  // await dp.AppInsights.SetAppInsightsKey("a9cb2873-a7bf-4e88-b0bd-b0fbde56ef37", "yx5y5ib2030r1hh11mgdlqnppaikf0ktqmdxm1vd");
+    var internalInsightsMapping = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsQuery(detectorId, timeRange));
+
     await dp.AppInsights.SetAppInsightsKey("bda43898-4456-4046-9a7c-9ffa83f47c33", "2ejbz8ipv8uzgq14cjyqsimvh0hyjoxjcr7mpima");
     var externalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetCustomEventsQuery(detectorId, timeRange));
+    var externalInsightsMapping = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsQuery(detectorId, timeRange));
 
+    string markdownStr = "";
+    string criticalCount = "0";
+    Dictionary<string, string> result = GetAllInsightsMarkDownstring(dataSource, internalInsightsMapping, externalInsightsMapping);
+
+    if (result != null)
+    {
+        markdownStr = result["markdown"];
+        criticalCount = result["critical"];
+    }
+
+    
+    if (criticalCount != "0")
+    {
+        ds5 = new DataSummary("Critical Insights", criticalCount, "orangered");
+    }
+    
+
+    
     expandedTimes = GetInsightsExpandedTimes(dataSource, externalInsightsTable, internalInsightsTable);
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
-    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4 });
+    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4, ds5 });
 
     // Unique subscriptions and resources graph
     var usersandResourcesRangeTable = new DiagnosticData()
@@ -284,29 +380,22 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     res.Dataset.Add(usersandResourcesRangeTable);
 
+       // if (!String.IsNullOrEmpty(markdownstr))
+   if (markdownStr != null && markdownStr != "")
+    {
+        Dictionary<string, string> insightsBody1 = new Dictionary<string, string>();
+        insightsBody1.Add("Insights List", markdownStr);
+        Insight allInsightMapping = new Insight(InsightStatus.Success, "✨ All Insights", insightsBody1, true);
+        res.AddInsight(allInsightMapping);
+    }
+    
+
     Dictionary<string, string> insightsBody = new Dictionary<string, string>();
     string markdownstr = GetAllCustomEventsQuery(dataSource, externalInsightsTable, internalInsightsTable);
     insightsBody.Add("Insights Ranking", markdownstr);
     Insight allInsight = new Insight(InsightStatus.Success, "💖 Top 5 expanded Insights", insightsBody, true);
 
     res.AddInsight(allInsight);
-
-    // res.Dataset.Add(
-    //     new DiagnosticData()
-    //     {
-    //         Table = internalInsightsTable,
-    //         RenderingProperties = new Rendering(RenderingType.Table)
-    //     }
-    // );
-
-    // res.Dataset.Add(
-    //     new DiagnosticData()
-    //     {
-    //         Table = externalInsightsTable,
-    //         RenderingProperties = new Rendering(RenderingType.Table)
-    //     }
-    // );
-
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
