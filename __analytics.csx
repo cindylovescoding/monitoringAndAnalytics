@@ -189,7 +189,13 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string deflectionCount = "0";
     string deflectionMonth = "";
 
-    SupportTopic[] supportTopicList = cxt["supportTopicList"];
+
+    SupportTopic[] supportTopicList = null;
+    if (cxt.ContainsKey("supportTopicList"))
+    {
+           supportTopicList  = cxt["supportTopicList"];
+    }
+
     if(supportTopicList == null || supportTopicList.Length == 0)
     {
         deflectionCount = "N/A";
