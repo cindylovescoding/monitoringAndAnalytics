@@ -79,6 +79,58 @@ private static string GetInsightsQuery(string detectorId, string timeRange)
     ";
 }
 
+private static string GetChildDetectorsExpandedQuery(string detectorId, string timeRange)
+{
+    return
+    $@"   customEvents 
+    | where timestamp >= ago({timeRange})
+    | where name contains 'ChildDetectorClicked' 
+    | where customDimensions.DetectorId contains '{detectorId}'
+    | where customDimensions.IsExpanded == 'true'
+    | extend s1 = split(operation_Name, '/')
+    | extend site = tostring(s1[8]),detectorId=tostring(customDimensions.DetectorId)
+    | extend ChildDetectorId = tostring(customDimensions.ChildDetectorId) 
+    | summarize HitCount = count() by ChildDetectorId 
+    ";
+}
+
+private static Dictionary<string, long> GetChildDetectorsExpandedMapping(string dataSource, DataTable internalChildDetectorsTable, DataTable externalChildDetectorsTable)
+{
+    Dictionary<string, long> allhash = new Dictionary<string, long>();
+
+    if (dataSource != "2")
+    {
+        for (int i = 0; i < internalChildDetectorsTable.Rows.Count; i++)
+        {
+            if (allhash.ContainsKey(internalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString()))
+            {
+                allhash[internalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString()] += Convert.ToInt64(internalChildDetectorsTable.Rows[i]["HitCount"]);
+            }
+            else
+            {
+                allhash[internalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString()] = Convert.ToInt64(internalChildDetectorsTable.Rows[i]["HitCount"]);
+            }
+        }
+    }
+
+    if (dataSource != "1")
+    {
+        for (int i = 0; i < externalChildDetectorsTable.Rows.Count; i++)
+        {
+            if (allhash.ContainsKey(externalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString()))
+            {
+                allhash[externalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString()] += Convert.ToInt64(externalChildDetectorsTable.Rows[i]["HitCount"]);
+            }
+            else
+            {
+                allhash[externalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString()] = Convert.ToInt64(externalChildDetectorsTable.Rows[i]["HitCount"]);
+            }
+        }
+    }
+
+    return allhash;
+}
+
 private static string GetCustomEventsInsightsCount(string detectorId, string timeRange)
 {
     return
@@ -186,7 +238,7 @@ private static string GetChildDetectorsQuery(string detectorId, string timeRange
     ";
 }
 
-private static string GetAllChildDetectorsQuery(string dataSource, DataTable internalChildDetectors, DataTable externalChildDetectors)
+private static string GetAllChildDetectorsQuery(string dataSource, DataTable internalChildDetectors, DataTable externalChildDetectors, Dictionary<string, long> childDetectorsExpandedMapping)
 {
     Dictionary<string, List<string>> allhash = new Dictionary<string, List<string>>();
     Dictionary<string, string> healthStatus = new Dictionary<string, string>() {{"0", "Critical"}, {"1", "Warning"}, {"2", "Info"}, {"3", "Success"}, {"4", "None"}};
@@ -198,6 +250,8 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             var lists1 = internalChildDetectors.Rows[i]["childLists"].ToString().Split(new string[] {"[{", "},{",  "}]"}, StringSplitOptions.RemoveEmptyEntries);
             //   res.AddInsight(InsightStatus.Success, internalChildDetectors.Rows[i]["childLists"].ToString());
             //  res.AddInsight(InsightStatus.Success, lists1.Length.ToString());
+
+            // DetectorInfo: 0: ChildDetectorId, 1: ChildDetectorStatus, 2: ChildDetectorLoadingStatus, 3: Showing Count, 4: Expanded times
             List<string> detectorInfo = new List<string>();
 
             foreach (var detectorItem in lists1)
@@ -206,12 +260,15 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             //     res.AddInsight(InsightStatus.Warning, detectorItem.ToString());
                 var info = detectorItem.Split(new string[] {","}, StringSplitOptions.RemoveEmptyEntries);
                 var childDetectorName = "";
+                var childDetectorId = "";
                 for (int k = 0; k < info.Length; k++)
                 {
-
                     //  "ChildDetectorName":"Check Swap Operations","ChildDetectorId":"swap","ChildDetectorStatus":0,"ChildDetectorLoadingStatus":1
                     var pair = info[k].Split(new string[] {":"}, StringSplitOptions.RemoveEmptyEntries);
                     if (pair.Length > 1) {
+                        if (k == 1) {
+                            childDetectorId = pair[1].Split('"', StringSplitOptions.RemoveEmptyEntries)[0];
+                        }
                         if (k == 0) {
                             childDetectorName = pair[1];
                             if (allhash.ContainsKey(childDetectorName)) {
@@ -227,14 +284,19 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
                             else {
                                 detectorInfo.Add(pair[1]);
                             }
-
                             
                         }
 
-                            if ( k == lists1.Length-1) {
-                                detectorInfo.Add("1");
-                                allhash[childDetectorName] = detectorInfo;
+                        if ( k == lists1.Length-1) {
+                            detectorInfo.Add("1");
+                            if (childDetectorsExpandedMapping.ContainsKey(childDetectorId)) {
+                                detectorInfo.Add(childDetectorsExpandedMapping[childDetectorId].ToString());
                             }
+                            else {
+                                detectorInfo.Add("0");
+                             }
+                            allhash[childDetectorName] = detectorInfo;
+                        }
                     }
                 }
             }
@@ -248,6 +310,7 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             var lists1 = externalChildDetectors.Rows[i]["childLists"].ToString().Split(new string[] {"[{", "},{",  "}]"}, StringSplitOptions.RemoveEmptyEntries);
             //   res.AddInsight(InsightStatus.Success, externalChildDetectors.Rows[i]["childLists"].ToString());
             //  res.AddInsight(InsightStatus.Success, lists1.Length.ToString());
+
             List<string> detectorInfo = new List<string>();
 
             foreach (var detectorItem in lists1)
@@ -256,12 +319,16 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             //     res.AddInsight(InsightStatus.Warning, detectorItem.ToString());
                 var info = detectorItem.Split(new string[] {","}, StringSplitOptions.RemoveEmptyEntries);
                 var childDetectorName = "";
+                var childDetectorId = "";
                 for (int k = 0; k < info.Length; k++)
                 {
 
                     //  "ChildDetectorName":"Check Swap Operations","ChildDetectorId":"swap","ChildDetectorStatus":0,"ChildDetectorLoadingStatus":1
                     var pair = info[k].Split(new string[] {":"}, StringSplitOptions.RemoveEmptyEntries);
                     if (pair.Length > 1) {
+                        if (k == 1) {
+                            childDetectorId = pair[1].Split('"', StringSplitOptions.RemoveEmptyEntries)[0];
+                        }
                         if (k == 0) {
                             childDetectorName = pair[1];
                             if (allhash.ContainsKey(childDetectorName)) {
@@ -278,9 +345,15 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
                                 detectorInfo.Add(pair[1]);
                             } 
                         }
-
+  
                         if ( k == lists1.Length-1) {
                             detectorInfo.Add("1");
+                            if (childDetectorsExpandedMapping.ContainsKey(childDetectorId)) {
+                                detectorInfo.Add(childDetectorsExpandedMapping[childDetectorId].ToString());
+                            }
+                            else {
+                                detectorInfo.Add("0");
+                             }
                             allhash[childDetectorName] = detectorInfo;
                         }
                     }
@@ -296,14 +369,14 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
     string markdown = @"<markdown>";
 
     markdown += $@"
-    | Child detector | Status | Count |
-    | :---: | :---:| :---:|
+    | Child detector | Status | Showing Count | Expanded Count |
+    | :---: | :---:| :---:| :---:|
     ";
 
     foreach (KeyValuePair<string, List<string>> kvp in dicSort)
     {
 
-        markdown += $@"| `{kvp.Key}` | ` {kvp.Value[1]}` |`{kvp.Value[3]} `|
+        markdown += $@"| `{kvp.Key}` | ` {kvp.Value[1]}` |`{kvp.Value[3]} `|`{kvp.Value[4]} `|
         ";
     }
     markdown += "</markdown>";
@@ -402,12 +475,17 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
     var internalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
     var internalChildDetectors = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsQuery(detectorId, timeRange));
+    var internalChildDetectorsExpand = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsExpandedQuery(detectorId, timeRange));
  
     await dp.AppInsights.SetAppInsightsKey("bda43898-4456-4046-9a7c-9ffa83f47c33", "2ejbz8ipv8uzgq14cjyqsimvh0hyjoxjcr7mpima");
     var externalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
     var externalChildDetectors = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsQuery(detectorId, timeRange));
+    var externalChildDetectorsExpand = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsExpandedQuery(detectorId, timeRange));
+
 
     expandedTimes = GetInsightsExpandedTimes(dataSource, externalInsightsTable, internalInsightsTable);
+    var childDetectorsExpandedMapping = GetChildDetectorsExpandedMapping(dataSource, internalChildDetectorsExpand, externalChildDetectorsExpand);
+
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
     res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4 });
 
@@ -443,8 +521,8 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
 
     Dictionary<string, string> childDetectorsBody = new Dictionary<string, string>();
-    markdownstr = GetAllChildDetectorsQuery(dataSource, internalChildDetectors, externalChildDetectors);
-    childDetectorsBody.Add("Children detectors count (Per Session/Site)", markdownstr);
+    markdownstr = GetAllChildDetectorsQuery(dataSource, internalChildDetectors, externalChildDetectors, childDetectorsExpandedMapping);
+    childDetectorsBody.Add("Children detectors status (Per Session/Site)", markdownstr);
     Insight allDetectors = new Insight(InsightStatus.Success, "✨ Children detectors ", childDetectorsBody, true);
 
     if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
