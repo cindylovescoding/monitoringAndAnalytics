@@ -144,6 +144,18 @@ private static string GetCustomEventsInsightsCount(string detectorId, string tim
     ";
 }
 
+private static string GetAllInsightsCount(string detectorId, string timeRange)
+{
+    return
+    $@" customEvents 
+    | where timestamp >= ago({timeRange}) 
+    | where name contains 'InsightsSummary' and customDimensions.DetectorId contains '{detectorId}'
+    | project timestamp, customDimensions = todynamic(tostring(customDimensions)), insightsSummary =  todynamic(tostring(customDimensions.InsightsSummary)),  insightsList =  todynamic(tostring(customDimensions.InsightsList))
+    | extend TotalCount = tolong(insightsSummary.Total), CriticalCount = tolong(insightsSummary.Critical), WarningCount = tolong(insightsSummary.Warning), SuccessCount = tolong(insightsSummary.Success), DefaultCount = tolong(insightsSummary.Default)
+    | summarize TotalCount = sum(TotalCount),  CriticalCount = sum(CriticalCount),  WarningCount = sum(WarningCount),  SuccessCount = sum(SuccessCount),  DefaultCount = sum(DefaultCount)
+    ";
+}
+
 private static string GetAllCustomEventsQuery(string dataSource, DataTable externalInsightsTable, DataTable internalInsightsTable)
 {
     Dictionary<string, long> allhash = new Dictionary<string, long>();
