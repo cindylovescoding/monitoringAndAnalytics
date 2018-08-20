@@ -258,33 +258,32 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             {
                 detectorInfo = new List<string>();
             //     res.AddInsight(InsightStatus.Warning, detectorItem.ToString());
+
+         // Info split on: "ChildDetectorName":"Check Swap Operations","ChildDetectorId":"swap","ChildDetectorStatus":0,"ChildDetectorLoadingStatus":1
                 var info = detectorItem.Split(new string[] {","}, StringSplitOptions.RemoveEmptyEntries);
                 var childDetectorName = "";
                 var childDetectorId = "";
                 for (int k = 0; k < info.Length; k++)
                 {
-                    //  "ChildDetectorName":"Check Swap Operations","ChildDetectorId":"swap","ChildDetectorStatus":0,"ChildDetectorLoadingStatus":1
                     var pair = info[k].Split(new string[] {":"}, StringSplitOptions.RemoveEmptyEntries);
                     if (pair.Length > 1) {
-                        if (k == 1) {
-                            childDetectorId = pair[1].Split('"', StringSplitOptions.RemoveEmptyEntries)[0];
-                        }
+
                         if (k == 0) {
                             childDetectorName = pair[1];
                             if (allhash.ContainsKey(childDetectorName)) {
-                                // Count++;
                                 allhash[childDetectorName][3] = (Convert.ToInt64(allhash[childDetectorName][3])+1).ToString();
                                 break;
                             }
                         }
+                        else  if (k == 1) {
+                            childDetectorId = pair[1].Split('"', StringSplitOptions.RemoveEmptyEntries)[0];
+                        }
+
+                        if (k == 2) {
+                            detectorInfo.Add(healthStatus[pair[1]]);
+                        }
                         else {
-                            if (k == 2) {
-                                detectorInfo.Add(healthStatus[pair[1]]);
-                            }
-                            else {
-                                detectorInfo.Add(pair[1]);
-                            }
-                            
+                            detectorInfo.Add(pair[1]);
                         }
 
                         if ( k == lists1.Length-1) {
@@ -322,13 +321,9 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
                 var childDetectorId = "";
                 for (int k = 0; k < info.Length; k++)
                 {
-
-                    //  "ChildDetectorName":"Check Swap Operations","ChildDetectorId":"swap","ChildDetectorStatus":0,"ChildDetectorLoadingStatus":1
                     var pair = info[k].Split(new string[] {":"}, StringSplitOptions.RemoveEmptyEntries);
                     if (pair.Length > 1) {
-                        if (k == 1) {
-                            childDetectorId = pair[1].Split('"', StringSplitOptions.RemoveEmptyEntries)[0];
-                        }
+
                         if (k == 0) {
                             childDetectorName = pair[1];
                             if (allhash.ContainsKey(childDetectorName)) {
@@ -336,16 +331,17 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
                                 break;
                             }
                         }
-                        else {
-                            // Mapping status enum to string
-                            if (k == 2) {
-                                detectorInfo.Add(healthStatus[pair[1]]);
-                            }
-                            else {
-                                detectorInfo.Add(pair[1]);
-                            } 
+                        else  if (k == 1) {
+                            childDetectorId = pair[1].Split('"', StringSplitOptions.RemoveEmptyEntries)[0];
                         }
-  
+
+                        if (k == 2) {
+                            detectorInfo.Add(healthStatus[pair[1]]);
+                        }
+                        else {
+                            detectorInfo.Add(pair[1]);
+                        }
+
                         if ( k == lists1.Length-1) {
                             detectorInfo.Add("1");
                             if (childDetectorsExpandedMapping.ContainsKey(childDetectorId)) {
