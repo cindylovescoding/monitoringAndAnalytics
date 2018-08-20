@@ -65,10 +65,11 @@ private static string GetUserandResourceRangeQuery(string detectorId, string dat
 }
 
 
-private static string GetCustomEventsQuery(string detectorId, string timeRange)
+private static string GetInsightsQuery(string detectorId, string timeRange)
 {
     return
     $@" customEvents 
+    | where name contains 'InsightsTitleClicked' 
     | where timestamp >= ago({timeRange}) 
     | where customDimensions.DetectorId contains '{detectorId}'
     | where customDimensions.IsExpanded == 'true'
@@ -83,6 +84,7 @@ private static string GetCustomEventsInsightsCount(string detectorId, string tim
     return
     $@" customEvents 
     | where timestamp >= ago({timeRange}) 
+    | where name contains 'InsightsTitleClicked' 
     | where customDimensions.DetectorId contains '{detectorId}'
     | where customDimensions.IsExpanded == 'true'
     | summarize HitCount = count() by tostring(customDimensions.Title)
@@ -258,10 +260,10 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     // AppInsights Table
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
-    var internalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetCustomEventsQuery(detectorId, timeRange));
+    var internalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
 
     await dp.AppInsights.SetAppInsightsKey("bda43898-4456-4046-9a7c-9ffa83f47c33", "2ejbz8ipv8uzgq14cjyqsimvh0hyjoxjcr7mpima");
-    var externalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetCustomEventsQuery(detectorId, timeRange));
+    var externalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
 
     expandedTimes = GetInsightsExpandedTimes(dataSource, externalInsightsTable, internalInsightsTable);
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
