@@ -296,7 +296,7 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
     string markdown = @"<markdown>";
 
     markdown += $@"
-    | Child detector | status | Count |
+    | Child detector | Status | Count |
     | :---: | :---:| :---:|
     ";
 
@@ -444,9 +444,13 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     Dictionary<string, string> childDetectorsBody = new Dictionary<string, string>();
     markdownstr = GetAllChildDetectorsQuery(dataSource, internalChildDetectors, externalChildDetectors);
-    childDetectorsBody.Add("Children detectors showed (Per Session/Site)", markdownstr);
+    childDetectorsBody.Add("Children detectors count (Per Session/Site)", markdownstr);
     Insight allDetectors = new Insight(InsightStatus.Success, "✨ Children detectors ", childDetectorsBody, true);
-    res.AddInsight(allDetectors);
+
+    if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
+        res.AddInsight(allDetectors);
+    }
+
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
     return res;
