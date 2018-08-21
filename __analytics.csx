@@ -151,16 +151,16 @@ private static string GetAllInsightsCount(string detectorId, string timeRange)
     | where timestamp >= ago({timeRange}) 
     | where name contains 'InsightsSummary' and customDimensions.DetectorId contains '{detectorId}'
     | project timestamp, customDimensions = todynamic(tostring(customDimensions)), insightsSummary =  todynamic(tostring(customDimensions.InsightsSummary)),  insightsList =  todynamic(tostring(customDimensions.InsightsList))
-    | extend TotalCount = tolong(insightsSummary.Total), CriticalCount = tolong(insightsSummary.Critical), WarningCount = tolong(insightsSummary.Warning), SuccessCount = tolong(insightsSummary.Success), DefaultCount = tolong(insightsSummary.Default)
-    | summarize TotalCount = sum(TotalCount),  CriticalCount = sum(CriticalCount),  WarningCount = sum(WarningCount),  SuccessCount = sum(SuccessCount),  DefaultCount = sum(DefaultCount)
+    | extend TotalCount = tolong(insightsSummary.Total), CriticalCount = tolong(insightsSummary.Critical), WarningCount = tolong(insightsSummary.Warning), SuccessCount = tolong(insightsSummary.Success), InfoCount = tolong(insightsSummary.Info),  DefaultCount = tolong(insightsSummary.Default)
+    | summarize TotalCount = sum(TotalCount),  CriticalCount = sum(CriticalCount),  WarningCount = sum(WarningCount),  SuccessCount = sum(SuccessCount), InfoCount = sum(InfoCount), DefaultCount = sum(DefaultCount)
     ";
 }
 
-private static string GetTotalInsightsMarkdown (string dataSource, DataTable internalAllInsightsCount, DataTable externalAllInsightsCount)
+private static string GetTotalInsightsMarkdown (string dataSource, DataTable internalAllInsightsCount, DataTable externalAllInsightsCount, out string criticalInsightsCount)
 {
     Dictionary<string, long> allhash = new Dictionary<string, long>();
-    string[] insightStatus = new string[5]{"TotalCount", "CriticalCount", "WarningCount", "SuccessCount", "DefaultCount"};
-    long[] insightStatusCount = new long[5];
+    string[] insightStatus = new string[6]{"TotalCount", "CriticalCount", "WarningCount", "SuccessCount", "InfoCount", "DefaultCount"};
+    long[] insightStatusCount = new long[6];
     if (dataSource != "2")
     {
         for (int i = 0; i < insightStatusCount.Length; i++)
@@ -179,8 +179,8 @@ private static string GetTotalInsightsMarkdown (string dataSource, DataTable int
 
     string markdown = @"<markdown>";
     markdown += $@"
-    | Total | Critical | Warning | Warning | Default |
-    | :---: | :---:| :---:| :---:| :---:|
+    | Total | Critical | Warning | Success | Info |  Default |
+    | :---: | :---:| :---:| :---:| :---:| :---:|
     ";
         
     foreach (var statusCount in insightStatusCount)
@@ -190,6 +190,8 @@ private static string GetTotalInsightsMarkdown (string dataSource, DataTable int
 
     markdown += $@"|";
     markdown += "</markdown>";
+
+    criticalInsightsCount = insightStatusCount[1].ToString();
     return markdown;
 }
 
@@ -444,6 +446,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     var uniqueSubscription = await dp.Kusto.ExecuteClusterQuery(GetUniqueSubscriptionQuery(detectorId, dataSource, timeRange));
     var uniqueResource = await dp.Kusto.ExecuteClusterQuery(GetUniqueResourceQuery(detectorId, dataSource, timeRange));
+    string criticalInsightsCount = "0";
     long expandedTimes = 0;
 
 
@@ -501,20 +504,8 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         }
     }
 
-    var ds1 = new DataSummary($"Case Deflection {deflectionMonth}", $"{deflectionCount}", "yellowgreen");
-    var ds2 = new DataSummary("Unique Subs", "0", "blue");
-    var ds3 = new DataSummary("Unique Resources", "0", "yellow");
-    var ds5 = new DataSummary("Critical Insights", "0", "orangered");
-    // limegreen orangered yellow
-    if (uniqueSubscription.Rows.Count > 0)
-    {
-        ds2 = new DataSummary("Unique Subs", uniqueSubscription.Rows[0][0].ToString(), "dodgerblue");
-    }
 
-    if (uniqueResource.Rows.Count > 0)
-    {
-        ds3 = new DataSummary("Unique Resources", uniqueResource.Rows[0][0].ToString(), "hotpink");
-    }
+    
 
     // AppInsights Table
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
@@ -534,8 +525,24 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     var childDetectorsExpandedMapping = GetChildDetectorsExpandedMapping(dataSource, internalChildDetectorsExpand, externalChildDetectorsExpand);
 
+    string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount, out criticalInsightsCount);
+
+    var ds1 = new DataSummary($"Case Deflection {deflectionMonth}", $"{deflectionCount}", "yellowgreen");
+    var ds2 = new DataSummary("Unique Subs", "0", "blue");
+    var ds3 = new DataSummary("Unique Resources", "0", "yellow");
+    // limegreen orangered yellow
+    if (uniqueSubscription.Rows.Count > 0)
+    {
+        ds2 = new DataSummary("Unique Subs", uniqueSubscription.Rows[0][0].ToString(), "dodgerblue");
+    }
+
+    if (uniqueResource.Rows.Count > 0)
+    {
+        ds3 = new DataSummary("Unique Resources", uniqueResource.Rows[0][0].ToString(), "hotpink");
+    }
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
-    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4 });
+    var ds5 = new DataSummary("Critical Insights", criticalInsightsCount, "orangered");
+    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4, ds5 });
 
     // Unique subscriptions and resources graph
     var usersandResourcesRangeTable = new DiagnosticData()
@@ -560,7 +567,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     res.Dataset.Add(usersandResourcesRangeTable);
 
-    string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount);
 
     Dictionary<string, string> insightssummaryBody = new Dictionary<string, string>();
     insightssummaryBody.Add("Insights status", totalInsightsMarkdown);
@@ -580,9 +586,9 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     childDetectorsBody.Add("Children detectors status (Per Session/Site)", markdownstr);
     Insight allDetectors = new Insight(InsightStatus.Success, "✨ Children detectors ", childDetectorsBody, true);
 
-    if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
-        res.AddInsight(allDetectors);
-    }
+    // if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
+    //     res.AddInsight(allDetectors);
+    // }
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
