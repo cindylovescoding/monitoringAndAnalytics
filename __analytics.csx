@@ -158,38 +158,37 @@ private static string GetAllInsightsCount(string detectorId, string timeRange)
 
 private static string GetTotalInsightsMarkdown (string dataSource, DataTable internalAllInsightsCount, DataTable externalAllInsightsCount)
 {
-    long totalCount = 0, criticalCount = 0, warningCount = 0, successCount = 0, defaultCount = 0;
     Dictionary<string, long> allhash = new Dictionary<string, long>();
+    string[] insightStatus = new string[5]{"TotalCount", "CriticalCount", "WarningCount", "SuccessCount", "DefaultCount"};
+    long[] insightStatusCount = new long[5];
     if (dataSource != "2")
     {
-        totalCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["TotalCount"]);
-        criticalCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["CriticalCount"]);
-        warningCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["WarningCount"]);
-        successCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["SuccessCount"]);
-        defaultCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["DefaultCount"]);
+        for (int i = 0; i < insightStatusCount.Length; i++)
+        {
+            insightStatusCount[i] += Convert.ToInt64(internalAllInsightsCount.Rows[0][insightStatus[i]]);
+        }
     }
 
     if (dataSource != "1")
     {
-        totalCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["TotalCount"]);
-        criticalCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["CriticalCount"]);
-        warningCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["WarningCount"]);
-        successCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["WarningCount"]);
-        defaultCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["DefaultCount"]);
+        for (int i = 0; i < insightStatusCount.Length; i++)
+        {
+            insightStatusCount[i] += Convert.ToInt64(externalAllInsightsCount.Rows[0][insightStatus[i]]);
+        }
     }
 
-    var dicSort = from objDic in allhash orderby objDic.Value descending select objDic;
     string markdown = @"<markdown>";
-
-
     markdown += $@"
-    | TotalCount| CriticalCount| WarningCount| WarningCount| DefaultCount|
+    | Total | Critical | Warning | Warning | Default |
     | :---: | :---:| :---:| :---:| :---:|
     ";
         
-    markdown += $@"| `{totalCount.ToString()}` | {criticalCount.ToString()}| {warningCount.ToString()}| {successCount.ToString()}| {defaultCount.ToString()}|
-        ";
+    foreach (var statusCount in insightStatusCount)
+    {
+        markdown += $@"| `{statusCount.ToString()}` ";
+    }
 
+    markdown += $@"|";
     markdown += "</markdown>";
     return markdown;
 }
@@ -531,7 +530,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     var externalAllInsightsCount = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsCount(detectorId, timeRange));
 
     expandedTimes = GetInsightsExpandedTimes(dataSource, externalInsightsTable, internalInsightsTable);
-    string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount);
     
 
     var childDetectorsExpandedMapping = GetChildDetectorsExpandedMapping(dataSource, internalChildDetectorsExpand, externalChildDetectorsExpand);
@@ -562,10 +560,17 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     res.Dataset.Add(usersandResourcesRangeTable);
 
+    string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount);
+
+    Dictionary<string, string> insightssummaryBody = new Dictionary<string, string>();
+    insightssummaryBody.Add("Insights status", totalInsightsMarkdown);
+    Insight allInsight = new Insight(InsightStatus.Success, "✨Insights status summary", insightssummaryBody, true);
+    res.AddInsight(allInsight);
+
     Dictionary<string, string> insightsBody = new Dictionary<string, string>();
     string markdownstr = GetAllCustomEventsQuery(dataSource, externalInsightsTable, internalInsightsTable);
     insightsBody.Add("Insights Ranking", markdownstr);
-    Insight allInsight = new Insight(InsightStatus.Success, "💖 Top 5 expanded Insights", insightsBody, true);
+    allInsight = new Insight(InsightStatus.Success, "💖 Top 5 expanded Insights", insightsBody, true);
     res.AddInsight(allInsight);
     markdownstr = "";
 
