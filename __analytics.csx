@@ -156,6 +156,44 @@ private static string GetAllInsightsCount(string detectorId, string timeRange)
     ";
 }
 
+private static string GetTotalInsightsMarkdown (string dataSource, DataTable internalAllInsightsCount, DataTable externalAllInsightsCount)
+{
+    long totalCount = 0, criticalCount = 0, warningCount = 0, successCount = 0, defaultCount = 0;
+    Dictionary<string, long> allhash = new Dictionary<string, long>();
+    if (dataSource != "2")
+    {
+        totalCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["TotalCount"]);
+        criticalCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["CriticalCount"]);
+        warningCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["WarningCount"]);
+        successCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["SuccessCount"]);
+        defaultCount += Convert.ToInt64(internalAllInsightsCount.Rows[0]["DefaultCount"]);
+    }
+
+    if (dataSource != "1")
+    {
+        totalCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["TotalCount"]);
+        criticalCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["CriticalCount"]);
+        warningCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["WarningCount"]);
+        successCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["WarningCount"]);
+        defaultCount += Convert.ToInt64(externalAllInsightsCount.Rows[0]["DefaultCount"]);
+    }
+
+    var dicSort = from objDic in allhash orderby objDic.Value descending select objDic;
+    string markdown = @"<markdown>";
+
+
+    markdown += $@"
+    | TotalCount| CriticalCount| WarningCount| WarningCount| DefaultCount|
+    | :---: | :---:| :---:| :---:| :---:|
+    ";
+        
+    markdown += $@"| `{totalCount.ToString()}` | {criticalCount.ToString()}| {warningCount.ToString()}| {successCount.ToString()}| {defaultCount.ToString()}|
+        ";
+
+    markdown += "</markdown>";
+    return markdown;
+}
+
 private static string GetAllCustomEventsQuery(string dataSource, DataTable externalInsightsTable, DataTable internalInsightsTable)
 {
     Dictionary<string, long> allhash = new Dictionary<string, long>();
@@ -484,14 +522,18 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     var internalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
     var internalChildDetectors = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsQuery(detectorId, timeRange));
     var internalChildDetectorsExpand = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsExpandedQuery(detectorId, timeRange));
+    var internalAllInsightsCount = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsCount(detectorId, timeRange));
  
     await dp.AppInsights.SetAppInsightsKey("bda43898-4456-4046-9a7c-9ffa83f47c33", "2ejbz8ipv8uzgq14cjyqsimvh0hyjoxjcr7mpima");
     var externalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
     var externalChildDetectors = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsQuery(detectorId, timeRange));
     var externalChildDetectorsExpand = await dp.AppInsights.ExecuteAppInsightsQuery(GetChildDetectorsExpandedQuery(detectorId, timeRange));
-
+    var externalAllInsightsCount = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsCount(detectorId, timeRange));
 
     expandedTimes = GetInsightsExpandedTimes(dataSource, externalInsightsTable, internalInsightsTable);
+    string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount);
+    
+
     var childDetectorsExpandedMapping = GetChildDetectorsExpandedMapping(dataSource, internalChildDetectorsExpand, externalChildDetectorsExpand);
 
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
