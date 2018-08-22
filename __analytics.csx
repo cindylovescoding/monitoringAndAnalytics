@@ -79,7 +79,7 @@ private static string GetInsightsQuery(string detectorId, string timeRange)
     ";
 }
 
-private static string GetChildDetectorsExpandedQuery(string detectorId, string timeRange)
+private static string GetChildDetectorsExpandedQuery1(string detectorId, string timeRange)
 {
     return
     $@"   customEvents 
@@ -94,7 +94,101 @@ private static string GetChildDetectorsExpandedQuery(string detectorId, string t
     ";
 }
 
-private static Dictionary<string, long> GetChildDetectorsExpandedMapping(string dataSource, DataTable internalChildDetectorsTable, DataTable externalChildDetectorsTable)
+private static string GetChildDetectorsExpandedQuery(string detectorId, string timeRange)
+{
+    return 
+    $@" (
+customEvents 
+    | where name contains 'ChildDetectorsSummary'
+    | where timestamp >= ago({timeRange}) and timestamp >= datetime(2018-08-22T00:59:08.564Z)
+    | where customDimensions.DetectorId contains '{detectorId}'
+    | extend ChildDetectorInfo = todynamic(tostring(customDimensions.ChildDetectorsList) ) 
+    | mvexpand ChildDetectorInfo
+    | extend childDetectorName = tostring(ChildDetectorInfo['ChildDetectorName']), childDetectorStatus = tostring(ChildDetectorInfo['ChildDetectorStatus']), loadingStatus = tolong(ChildDetectorInfo['ChildDetectorLoadingStatus']), childDetectorId = tostring(ChildDetectorInfo['ChildDetectorId']) 
+    | project ChildDetectorInfo, childDetectorName , childDetectorId, childDetectorStatus, loadingStatus
+    | summarize showedCount = tostring(count()) by childDetectorName, childDetectorId, childDetectorStatus
+)
+| join kind= leftouter (
+customEvents 
+// datetime(2015-12-31 23:59:59.9)
+    | where timestamp >= ago({timeRange}) and timestamp >= datetime(2018-08-22T00:59:08.564Z)
+    | where name contains 'ChildDetectorClicked' 
+    | where customDimensions.DetectorId contains '{detectorId}'
+    | where customDimensions.IsExpanded == 'true'
+    | where isnotempty(customDimensions['Status'])
+    | extend  childDetectorName = tostring(customDimensions['ChildDetectorName']),  childDetectorId = tostring(customDimensions['ChildDetectorId']), childDetectorStatus = tostring(customDimensions['Status'])
+    | summarize hitCount = tostring(count()) by  childDetectorName, childDetectorId, childDetectorStatus
+)
+on childDetectorName, childDetectorId, childDetectorStatus
+| project-away childDetectorName1, childDetectorStatus1, childDetectorId1
+| sort by hitCount 
+    ";
+}
+
+private static string GetChildDetectorsExpandedMapping(string dataSource, DataTable internalChildDetectorsTable, DataTable externalChildDetectorsTable)
+{
+    // table schema: childDetectorName, childDetectorId, childDetectorStatus, showedCount, hitCount
+    // Dictionary value list will be: 0: childDetectorName, 1: childDetectorStatus, 2: showedCount, 3, hitCount
+    Dictionary<string, List<string>> allhash = new Dictionary<string, List<string>>();
+    string[] status = new string[5]{"Critical", "Warning", "Info", "Success", "None"};
+    if (dataSource != "2")
+    {
+        for (int i = 0; i < internalChildDetectorsTable.Rows.Count; i++)
+        {
+            string hashkey = internalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString() + internalChildDetectorsTable.Rows[i]["childDetectorStatus"].ToString();
+            if (allhash.ContainsKey(hashkey))
+            {
+                allhash[hashkey][2] = Convert.ToString(Convert.ToInt64(allhash[hashkey][2]) + Convert.ToInt64(internalChildDetectorsTable.Rows[i]["showedCount"]));
+                allhash[hashkey][3] = Convert.ToString(Convert.ToInt64(allhash[hashkey][3]) + Convert.ToInt64(internalChildDetectorsTable.Rows[i]["hitCount"]));
+            }
+            else
+            {
+                var statusIndex =  Convert.ToInt32(internalChildDetectorsTable.Rows[i]["childDetectorStatus"]);
+                 allhash[hashkey] = new List<string> {internalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), status[statusIndex], internalChildDetectorsTable.Rows[i]["showedCount"].ToString(), internalChildDetectorsTable.Rows[i]["hitCount"].ToString()};
+               //    allhash[hashkey] = new List<string> { status[statusIndex], internalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), "", ""};
+            }
+        }
+    }
+
+    if (dataSource != "1")
+    {
+        for (int i = 0; i < externalChildDetectorsTable.Rows.Count; i++)
+        {
+            string hashkey = externalChildDetectorsTable.Rows[i]["ChildDetectorId"].ToString() + externalChildDetectorsTable.Rows[i]["childDetectorStatus"].ToString();
+            if (allhash.ContainsKey(hashkey))
+            {
+                allhash[hashkey][2] = Convert.ToString(Convert.ToInt64(allhash[hashkey][2]) + Convert.ToInt64(externalChildDetectorsTable.Rows[i]["showedCount"]));
+                allhash[hashkey][3] = Convert.ToString(Convert.ToInt64(allhash[hashkey][3]) + Convert.ToInt64(externalChildDetectorsTable.Rows[i]["hitCount"]));
+            }
+            else
+            {
+                allhash[hashkey] = new List<string> {externalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), status[Convert.ToInt32(externalChildDetectorsTable.Rows[i]["childDetectorStatus"])], externalChildDetectorsTable.Rows[i]["showedCount"].ToString(), externalChildDetectorsTable.Rows[i]["hitCount"].ToString()};
+            }
+        }
+    }
+
+        // table schema: childDetectorName, childDetectorId, childDetectorStatus, showedCount, hitCount
+        // Dictionary value list will be: 0: childDetectorName, 1: childDetectorStatus, 2: showedCount, 3, hitCount
+
+  //  var dicSort = from objDic in allhash orderby objDic.Value descending select objDic;
+
+    var dicSort = from objDic in allhash orderby objDic.Value[3] select objDic;
+    string markdown = @"<markdown>";
+    markdown += $@"
+    | Child Detector Name | Status | Showed Count | Expanded Count |
+    | :---: | :---:| :---:| :---:|
+    ";
+        
+    foreach (KeyValuePair<string, List<string>> kvp in dicSort)
+    {
+        markdown += $@"| `{kvp.Value[0]}` | `{kvp.Value[1]}` | `{kvp.Value[2]}`| `{kvp.Value[3]}`| ";
+    }
+
+    markdown += $@"|";
+    markdown += "</markdown>";
+    return markdown;
+}
+private static Dictionary<string, long> GetChildDetectorsExpandedMapping1(string dataSource, DataTable internalChildDetectorsTable, DataTable externalChildDetectorsTable)
 {
     Dictionary<string, long> allhash = new Dictionary<string, long>();
 
@@ -582,13 +676,13 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
 
     Dictionary<string, string> childDetectorsBody = new Dictionary<string, string>();
-    markdownstr = GetAllChildDetectorsQuery(dataSource, internalChildDetectors, externalChildDetectors, childDetectorsExpandedMapping);
+    markdownstr = childDetectorsExpandedMapping;
     childDetectorsBody.Add("Children detectors status (Per Session/Site)", markdownstr);
     Insight allDetectors = new Insight(InsightStatus.Success, "✨ Children detectors ", childDetectorsBody, true);
 
-    // if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
-    //     res.AddInsight(allDetectors);
-    // }
+    if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
+        res.AddInsight(allDetectors);
+    }
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
