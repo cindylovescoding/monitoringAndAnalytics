@@ -170,32 +170,6 @@ private static string GetChildDetectorsExpandedMapping(string dataSource, DataTa
         // table schema: childDetectorName, childDetectorId, childDetectorStatus, showedCount, hitCount
         // Dictionary value list will be: 0: childDetectorName, 1: childDetectorStatus, 2: showedCount, 3, hitCount
 
-  //  var dicSort = from objDic in allhash orderby objDic.Value descending select objDic;
-
-
-
-    // var dicSort = from objDic in allhash orderby objDic.Value descending select objDic;
-    // string markdown = @"<markdown>";
-
-
-    // markdown += $@"
-    // | Insights Title | Expanded Count|
-    // | :---: | :---:|
-    // ";
-
-    // int count = 0;
-    // foreach (KeyValuePair<string, long> kvp in dicSort)
-    // {
-    //     if (count++ >= 5)
-    //         break;
-    //     markdown += $@"| `{kvp.Key}` | {kvp.Value}|
-    //     ";
-    // }
-    // markdown += "</markdown>";
-
-
-
-
     var dicSort = from objDic in allhash orderby objDic.Value[3] descending select objDic;
     string markdown = @"<markdown>";
 
@@ -359,11 +333,11 @@ private static string GetAllCustomEventsQuery(string dataSource, DataTable exter
     | :---: | :---:|
     ";
 
-    int count = 0;
+//    int count = 0;
     foreach (KeyValuePair<string, long> kvp in dicSort)
     {
-        if (count++ >= 5)
-            break;
+        // if (count++ >= 5)
+        //     break;
         markdown += $@"| `{kvp.Key}` | {kvp.Value}|
         ";
     }
@@ -420,8 +394,6 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
         for (int i = 0; i < internalChildDetectors.Rows.Count; i++)
         {
             var lists1 = internalChildDetectors.Rows[i]["childLists"].ToString().Split(new string[] {"[{", "},{",  "}]"}, StringSplitOptions.RemoveEmptyEntries);
-            //   res.AddInsight(InsightStatus.Success, internalChildDetectors.Rows[i]["childLists"].ToString());
-            //  res.AddInsight(InsightStatus.Success, lists1.Length.ToString());
 
             // DetectorInfo: 0: ChildDetectorId, 1: ChildDetectorStatus, 2: ChildDetectorLoadingStatus, 3: Showing Count, 4: Expanded times
             List<string> detectorInfo = new List<string>();
@@ -479,8 +451,6 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
         for (int i = 0; i < externalChildDetectors.Rows.Count; i++)
         {
             var lists1 = externalChildDetectors.Rows[i]["childLists"].ToString().Split(new string[] {"[{", "},{",  "}]"}, StringSplitOptions.RemoveEmptyEntries);
-            //   res.AddInsight(InsightStatus.Success, externalChildDetectors.Rows[i]["childLists"].ToString());
-            //  res.AddInsight(InsightStatus.Success, lists1.Length.ToString());
 
             List<string> detectorInfo = new List<string>();
 
@@ -705,7 +675,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     Dictionary<string, string> childDetectorsBody = new Dictionary<string, string>();
     markdownstr = childDetectorsExpandedMapping;
-    childDetectorsBody.Add("Children detectors", markdownstr);
+    childDetectorsBody.Add("Children Detectors", markdownstr);
     Insight allDetectors = new Insight(InsightStatus.Success, "✨ Children detectors summary ", childDetectorsBody, true);
 
     if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
