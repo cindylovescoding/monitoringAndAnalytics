@@ -821,6 +821,23 @@ private static string GetTotalDeflectionQuery(string category, string supportTop
 }
 
 // TODO : This is a Hack right now and we should figure out a way to programatically get this.
+
+
+private static string GetSupportTopicMapQuery()
+{
+                
+            AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago(30d)
+| where DerivedProductIDStr in ("16072")
+| summarize by Incidents_SupportTopicL2Current , Incidents_SupportTopicL3Current , Incidents_CurrentTopicIdFullPath
+| where Incidents_CurrentTopicIdFullPath contains "\\32598331" 
+}
+private static Dictionary<string, Tuple<string, string>> GetSupportTopicMap()
+{
+    
+
+}
+
+
 private static Dictionary<string, Tuple<string, string>> supportTopicMap = new Dictionary<string, Tuple<string, string>>()
 {
     {"32542218", new Tuple<string, string>("Availability, Performance, and Application Issues", "Web app down or reporting errors")},
