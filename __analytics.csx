@@ -651,6 +651,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     SupportTopic[] supportTopicList = null;
     if (cxt.ContainsKey("supportTopicList"))
     {
+        // Id, PesId;
            supportTopicList  = cxt["supportTopicList"];
     }
 
@@ -661,6 +662,18 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     else
     {
         List<Task<DataTable>> deflectionTasks = new List<Task<DataTable>>();
+        List<Task<DataTable>> supportTopicMapTasks = new List<Task<DataTable>>();
+        foreach (var topic in supportTopicList)
+        {
+            supportTopicMapTasks.Add(dp.Kusto.ExecuteClusterQuery(GetSupportTopicMapQuery(topic.Id, topic.PseId, timeRange)));
+        }
+
+        var supportTopicTasksList = await Task.WhenAll(supportTopicMapTasks);
+        Dictionary<string, Tuple<string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string>>();
+        if (supportTopicTasksList != null && supportTopicTasksList.Length > 0)
+        {
+            
+        }
         foreach(var topic in supportTopicList)
         {
             if (supportTopicMap.ContainsKey(topic.Id))
@@ -823,19 +836,25 @@ private static string GetTotalDeflectionQuery(string category, string supportTop
 // TODO : This is a Hack right now and we should figure out a way to programatically get this.
 
 
-private static string GetSupportTopicMapQuery()
+private static string GetSupportTopicMapQuery(string id, string pseId, string timeRange)
 {
-                
-            AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago(30d)
-| where DerivedProductIDStr in ("16072")
-| summarize by Incidents_SupportTopicL2Current , Incidents_SupportTopicL3Current , Incidents_CurrentTopicIdFullPath
-| where Incidents_CurrentTopicIdFullPath contains "\\32598331" 
+    return $@"
+        cluster('usage360').database('Product360').
+        AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago({timeRange})
+        | where DerivedProductIDStr in ({pseId})
+        | where Incidents_CurrentTopicIdFullPath contains '{id}' 
+        | summarize by SupportTopicL2 = Incidents_SupportTopicL2Current , SupportTopicL3 = Incidents_SupportTopicL3Current , SupportTopicIdFull = Incidents_CurrentTopicIdFullPath
+    ";
+//             AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago(30d)
+// | where DerivedProductIDStr in ("16072")
+// | summarize by Incidents_SupportTopicL2Current , Incidents_SupportTopicL3Current , Incidents_CurrentTopicIdFullPath
+// | where Incidents_CurrentTopicIdFullPath contains "\\32598331" 
 }
-private static Dictionary<string, Tuple<string, string>> GetSupportTopicMap()
-{
+// private static Dictionary<string, Tuple<string, string>> GetSupportTopicMap()
+// {
     
 
-}
+// }
 
 
 private static Dictionary<string, Tuple<string, string>> supportTopicMap = new Dictionary<string, Tuple<string, string>>()
