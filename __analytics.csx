@@ -631,12 +631,12 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string detectorId = cxt["detectorId"].ToString();
     string dataSource = cxt["dataSource"].ToString();
     string timeRange = cxt["timeRange"].ToString() + "h";
-    string timeGrain = "5m";
+    string timeGrain = "30m";
 
     if (timeRange == "72h")
-        timeGrain = "15m";
+        timeGrain = "60m";
     else if (timeRange == "168h")
-        timeGrain = "1h";
+        timeGrain = "180m";
 
     var uniqueSubscription = await dp.Kusto.ExecuteClusterQuery(GetUniqueSubscriptionQuery(detectorId, dataSource, timeRange));
     var uniqueResource = await dp.Kusto.ExecuteClusterQuery(GetUniqueResourceQuery(detectorId, dataSource, timeRange));
@@ -751,6 +751,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         {
             Title = "Unique Subscriptions and Resources",
             GraphType = TimeSeriesType.BarGraph,
+          //GraphType = TimeSeriesType.LineGraph,
             GraphOptions = new
             {
                 color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
