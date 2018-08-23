@@ -1,4 +1,8 @@
  using System.Linq;
+using Diagnostics.ModelsAndUtils.Models;
+using System.Reflection;
+
+
  private static string GetTableName(string dataSource, string timeRange)
 {
     var dbName = "wawsprod";
@@ -624,6 +628,33 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
     return markdown;
 }
 
+private static string GetSupportTopicMapQuery(string id, string pesId, string timeRange)
+{
+    // pesId: "16072", Id: "\\32598331"
+    // Should not include timeRange cause we show monthly data currently:  | where Incidents_CreatedTime > ago({timeRange})
+    return $@"
+        cluster('usage360').database('Product360').
+        AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago(30d)
+        | where DerivedProductIDStr in ({pesId})
+        | where Incidents_CurrentTopicIdFullPath contains '{id}' 
+        | extend FullId = strcat(tostring(DerivedProductIDStr), '\\', tostring('{id}')), Id = tostring({id}), PesId = tostring(DerivedProductIDStr)
+        | summarize by FullId, PesId, Id,TopicL2 = tostring( Incidents_SupportTopicL2Current) , SupportTopicL3 = tostring(Incidents_SupportTopicL3Current) , TopicIdFull = tostring(Incidents_CurrentTopicIdFullPath)
+        | extend TopicL3 = iff(SupportTopicL3 == 'UNKNOWN', '', SupportTopicL3)
+        | project FullId, PesId, Id, TopicL2, TopicL3 
+    ";
+//             AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago(30d)
+// | where DerivedProductIDStr in ("16072")
+// | summarize by Incidents_SupportTopicL2Current , Incidents_SupportTopicL3Current , Incidents_CurrentTopicIdFullPath
+// | where Incidents_CurrentTopicIdFullPath contains "\\32598331" 
+}
+// private static Dictionary<string, Tuple<string, string>> GetSupportTopicMap()
+// {
+    
+
+// }
+
+
+
 [SystemFilter]
 [Definition(Id = "__analytics", Name = "Business analytics", Author = "xipeng,shgup", Description = "")]
 public async static Task<Response> Run(DataProviders dp, Dictionary<string, dynamic> cxt, Response res)
@@ -663,25 +694,43 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     {
         List<Task<DataTable>> deflectionTasks = new List<Task<DataTable>>();
         List<Task<DataTable>> supportTopicMapTasks = new List<Task<DataTable>>();
+
         foreach (var topic in supportTopicList)
         {
-            supportTopicMapTasks.Add(dp.Kusto.ExecuteClusterQuery(GetSupportTopicMapQuery(topic.Id, topic.PseId, timeRange)));
+            var json = JsonConvert.SerializeObject(topic);
+            res.AddInsight(InsightStatus.Success, json.ToString());
+
+            // Example output: FullId, PesId, Id, TopicL2, TopicL3
+           supportTopicMapTasks.Add(dp.Kusto.ExecuteClusterQuery(GetSupportTopicMapQuery(topic.Id, topic.PesId, timeRange)));
         }
 
         var supportTopicTasksList = await Task.WhenAll(supportTopicMapTasks);
-        Dictionary<string, Tuple<string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string>>();
+
+       // supportTopicMapping holds the ID/PesId mapping to support topic L2/L3.
+        Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
         if (supportTopicTasksList != null && supportTopicTasksList.Length > 0)
         {
-            
+            foreach (var table in supportTopicTasksList)
+            {
+                res.AddInsight(InsightStatus.Warning, table.Rows.Count.ToString());
+                if (table != null && table.Rows != null && table.Rows.Count > 0)
+                {
+                    string supportTopicKey = table.Rows[0]["FullId"].ToString();
+                    supportTopicMapping[table.Rows[0]["FullId"].ToString()] = new Tuple<string, string, string, string>(table.Rows[0]["PesId"].ToString(), table.Rows[0]["Id"].ToString(), table.Rows[0]["TopicL2"].ToString(), table.Rows[0]["TopicL3"].ToString());
+
+                    res.AddInsight(InsightStatus.Warning, supportTopicKey + "\\" + supportTopicMapping[supportTopicKey].Item1 + "\\"+ supportTopicMapping[supportTopicKey].Item2+ "\\"+ supportTopicMapping[supportTopicKey].Item3 +"\\"+ supportTopicMapping[supportTopicKey].Item4);
+                }
+            }
         }
         foreach(var topic in supportTopicList)
         {
-            if (supportTopicMap.ContainsKey(topic.Id))
+            var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
+            if (supportTopicMapping.ContainsKey(fullId))
             {
-                deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
+             //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
+                deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             }
         }
-
 
         var deflectionTableList = await Task.WhenAll(deflectionTasks);
 
@@ -710,9 +759,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
             }
         }
     }
-
-
-    
 
     // AppInsights Table
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
@@ -836,26 +882,6 @@ private static string GetTotalDeflectionQuery(string category, string supportTop
 // TODO : This is a Hack right now and we should figure out a way to programatically get this.
 
 
-private static string GetSupportTopicMapQuery(string id, string pseId, string timeRange)
-{
-    return $@"
-        cluster('usage360').database('Product360').
-        AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago({timeRange})
-        | where DerivedProductIDStr in ({pseId})
-        | where Incidents_CurrentTopicIdFullPath contains '{id}' 
-        | summarize by SupportTopicL2 = Incidents_SupportTopicL2Current , SupportTopicL3 = Incidents_SupportTopicL3Current , SupportTopicIdFull = Incidents_CurrentTopicIdFullPath
-    ";
-//             AllCloudSupportIncidentDataWithP360MetadataMapping | where Incidents_CreatedTime > ago(30d)
-// | where DerivedProductIDStr in ("16072")
-// | summarize by Incidents_SupportTopicL2Current , Incidents_SupportTopicL3Current , Incidents_CurrentTopicIdFullPath
-// | where Incidents_CurrentTopicIdFullPath contains "\\32598331" 
-}
-// private static Dictionary<string, Tuple<string, string>> GetSupportTopicMap()
-// {
-    
-
-// }
-
 
 private static Dictionary<string, Tuple<string, string>> supportTopicMap = new Dictionary<string, Tuple<string, string>>()
 {
@@ -888,6 +914,5 @@ private static Dictionary<string, Tuple<string, string>> supportTopicMap = new D
     {"32608425", new Tuple<string, string>("Networking", "Configuring UDRs")},
     {"32608427", new Tuple<string, string>("Networking", "Connectivity (VNet or on-prem)")}
 };
-
 
 #endregion
