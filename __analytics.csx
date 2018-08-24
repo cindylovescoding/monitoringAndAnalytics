@@ -751,11 +751,13 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string timeRange = cxt["timeRange"].ToString() + "h";
     string timeGrain = "30m";
     string deflectionTableName = "";
+    string deflectionSolutionTable = "";
     bool isSolution = false;
     string deflectionTimeRange = "Month";
 
-    if (timeRange == "72h")
+    if (timeRange == "72h") {
         timeGrain = "60m";
+    }
     else if (timeRange == "168h"){
         timeGrain = "180m";
         deflectionTimeRange = "Week";
@@ -770,12 +772,13 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string criticalInsightsCount = "0";
     long expandedTimes = 0;
 
-
     string deflectionCount = "0";
     string deflectionMonth = "";
 
 
     List<Task<DataTable>> deflectionTrendTasks = new List<Task<DataTable>>();
+    List<Task<DataTable>> deflectionSolutionTasks = new List<Task<DataTable>>();
+
     Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
 
     SupportTopic[] supportTopicList = null;
@@ -816,13 +819,17 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 }
             }
         }
+
         foreach(var topic in supportTopicList)
         {
             var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
             if (supportTopicMapping.ContainsKey(fullId))
             {
                 deflectionTableName = GetDeflectionTable(isSolution, timeRange);
+                deflectionSolutionTable = GetDeflectionTable(true, timeRange);
                 deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+                deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+                deflectionSolutionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             }
         }
 
@@ -898,6 +905,25 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     var ds5 = new DataSummary("Critical Insights", criticalInsightsCount, "orangered");
     res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4, ds5 });
 
+
+    if(supportTopicList != null && supportTopicList.Length > 0) {
+
+        var deflectionSolutionList = await Task.WhenAll(deflectionSolutionTasks);
+
+        if (deflectionSolutionList != null && deflectionSolutionList.Length > 0)
+        {
+            foreach(var table in deflectionSolutionList)
+            {
+                var deflectionTrendTableRendering = new DiagnosticData()
+                {
+                    Table = table,
+                    RenderingProperties = new Rendering(RenderingType.Table)
+                };
+                res.Dataset.Add(deflectionTrendTableRendering);
+            }
+        }
+    }
+
     // Unique subscriptions and resources graph
     var usersandResourcesRangeTable = new DiagnosticData()
     {
@@ -959,16 +985,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     // Not working part:
 
     if(supportTopicList != null && supportTopicList.Length > 0) {
-         foreach(var topic in supportTopicList)
-        {
-            var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
-            if (supportTopicMapping.ContainsKey(fullId))
-            {
-                //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
-                deflectionTableName = GetDeflectionTable(isSolution, timeRange);
-                deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
-            }
-        }
 
         var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
 
@@ -1027,6 +1043,28 @@ private static string GetTotalDeflectionQuery(string tableName, string pesId, st
     | where DenominatorQuantity != 0 
     | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity),Numerator = sum(NumeratorQuantity), Denominator = sum(DenominatorQuantity) by period
     | top 1 by period desc
+    ";
+}
+
+private static string GetDeflectionBySolution(string tableName, string pesId, string category, string supportTopic)
+{
+    return $@"
+    cluster('usage360').database('Product360').
+    {tableName}
+    | extend Current = CurrentDenominatorQuantity, Previous = PreviousDenominatorQuantity, PreviousN = PreviousNDenominatorQuantity , CurrentQ = CurrentNumeratorQuantity, PreviousQ = PreviousNumeratorQuantity, PreviousNQ = PreviousNNumeratorQuantity,  Change = CurrentNumeratorQuantity-PreviousNumeratorQuantity
+    | extend C_ID = SolutionType, C_Name = SolutionType
+    | where SupportTopicL2 contains '{category}'
+    | where SupportTopicL3 contains '{supportTopic}'
+    | where (DerivedProductIDStr == @'{pesId}')
+    | where C_ID != ''
+    | summarize C_Name=any(C_Name), Current= sum(Current), Previous = sum(Previous), PreviousN = sum(PreviousN), CurrentQ = sum(CurrentNumeratorQuantity), PreviousQ = sum(PreviousNumeratorQuantity), PreviousNQ = sum(PreviousNNumeratorQuantity) by C_ID | extend Change = Current - Previous
+    | extend CurPer = iff(Current == 0, todouble(''), CurrentQ/Current), PrevPer = iff(Previous == 0, todouble(''), PreviousQ/Previous), NPrevPer = iff(PreviousN == 0, todouble(''), PreviousNQ/PreviousN)
+    | order by Current desc, Previous desc, PreviousN desc
+    | limit 100
+    | project C_ID, C_Name = iif(isempty(C_Name),C_ID,C_Name), Current, CurPer, Previous, PrevPer, Change, PreviousN, NPrevPer
+    | order by Current desc, Previous desc, PreviousN desc
+    | project Id = C_ID, Name = C_Name, Current = CurPer, CurrentNumerator = CurPer * Current, CurrentDenominator = Current, Previous = PrevPer, PreviousNumerator = PrevPer * Previous, PreviousDenominator = Previous, Change, 12WeeksPrior = NPrevPer
+    | project Name , CurrentDeflection = round(Current*100.0,2),  CurrentNumerator, CurrentDenominator , PreviousDeflection = round(Previous *100.0,2),  PreviousNumerator, PreviousDenominator
     ";
 }
 
