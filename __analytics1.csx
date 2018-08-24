@@ -727,6 +727,14 @@ private static string GetSupportTopicMapQuery(string id, string pesId, string ti
 private static string GetDeflectionTable(bool isSolution, string timeRange)
 {
     string tableName = "";
+
+    // For testing purpose, Use the monthly table first
+    // if (timeRange == "168h") {
+    //     if (isSolution)
+    //         tableName =  "SupportProductionDeflectionMonthlyPoPInsightsVer1023";
+    //     else 
+    //         tableName =  "SupportProductionDeflectionMonthlyVer1023";
+    // }
     if (timeRange == "168h") {
         if (isSolution)
             tableName =  "SupportProductionDeflectionWeeklyPoPInsightsVer1023";
@@ -754,9 +762,10 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     bool isSolution = false;
     string deflectionTimeRange = "Month";
 
-    if (timeRange == "72h")
+    if (timeRange == "72h") {
         timeGrain = "60m";
-    else if (timeRange == "168h"){
+    }
+    else if (timeRange == "168h") {
         timeGrain = "180m";
         deflectionTimeRange = "Week";
     }
@@ -774,9 +783,9 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string deflectionCount = "0";
     string deflectionMonth = "";
 
-
     List<Task<DataTable>> deflectionTrendTasks = new List<Task<DataTable>>();
     Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
+
 
     SupportTopic[] supportTopicList = null;
     if (cxt.ContainsKey("supportTopicList"))
@@ -821,6 +830,8 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
             var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
             if (supportTopicMapping.ContainsKey(fullId))
             {
+             //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
+        //        deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
                 deflectionTableName = GetDeflectionTable(isSolution, timeRange);
                 deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             }
@@ -956,21 +967,18 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         res.AddInsight(allDetectors);
     }
 
-    // Not working part:
-
-    if(supportTopicList != null && supportTopicList.Length > 0) {
-         foreach(var topic in supportTopicList)
+     foreach(var topic in supportTopicList)
+    {
+        var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
+        if (supportTopicMapping.ContainsKey(fullId))
         {
-            var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
-            if (supportTopicMapping.ContainsKey(fullId))
-            {
-                //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
-                deflectionTableName = GetDeflectionTable(isSolution, timeRange);
-                deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
-            }
+            //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
+            deflectionTableName = GetDeflectionTable(isSolution, timeRange);
+            deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
         }
+    }
 
-        var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
+            var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
 
         if (deflectionTrendList != null && deflectionTrendList.Length > 0)
         {
@@ -1001,11 +1009,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 res.Dataset.Add(deflectionTrendTableRendering);
             }
         }
-    }
-   
-
-
-
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
