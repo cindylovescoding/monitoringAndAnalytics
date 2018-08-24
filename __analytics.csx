@@ -229,26 +229,6 @@ private static string GetInsightsExpandedMapping(string dataSource, DataTable in
     return markdown;
 }
 
-
-private static class EventLogIcons
-{
-    public static string Critical = @"<i class=""fa fa-times-circle"" style=""color:#ce4242"" aria-hidden=""true""></i>";
-
-    public static string Error = @"<i class=""fa fa-exclamation-circle"" style=""color:red"" aria-hidden=""true""></i>";
-
-    public static string Warning = @"<i class=""fa fa-exclamation-triangle"" style=""color:#ff9104"" aria-hidden=""true""></i>";
-
-    public static string Info = @"<i class=""fa fa-info-circle"" style=""color:#3a9bc7"" aria-hidden=""true""></i>";
-
-    public static string Verbose = @"<i class=""fa fa-exclamation-circle"" style=""color:#a9abad"" aria-hidden=""true""></i>";
-
-    public static string Success = @"<i class=""fa  class.fa-check-circle"" style=""color:#a9abad"" aria-hidden=""true""></i>";
-
-    public static string[] statusIcon = new string[] {Critical, Warning, Info, Success, Verbose};
-} 
- 
-
-
 private static string GetChildDetectorsExpandedMapping(string dataSource, DataTable internalChildDetectorsTable, DataTable externalChildDetectorsTable)
 {
     // table schema: childDetectorName, childDetectorId, childDetectorStatus, showedCount, hitCount
@@ -269,7 +249,7 @@ private static string GetChildDetectorsExpandedMapping(string dataSource, DataTa
             else
             {
                 var statusIndex =  Convert.ToInt32(internalChildDetectorsTable.Rows[i]["childDetectorStatus"]);
-                 allhash[hashkey] = new List<string> {internalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), EventLogIcons.statusIcon[statusIndex], internalChildDetectorsTable.Rows[i]["showedCount"].ToString(), hitCount.ToString()};
+                 allhash[hashkey] = new List<string> {internalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), status[statusIndex], internalChildDetectorsTable.Rows[i]["showedCount"].ToString(), hitCount.ToString()};
                //    allhash[hashkey] = new List<string> { status[statusIndex], internalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), "", ""};
             }
         }
@@ -287,7 +267,6 @@ private static string GetChildDetectorsExpandedMapping(string dataSource, DataTa
             }
             else
             {
-                // var statusIndex =  Convert.ToInt32(internalChildDetectorsTable.Rows[i]["childDetectorStatus"]);
                 allhash[hashkey] = new List<string> {externalChildDetectorsTable.Rows[i]["childDetectorName"].ToString(), status[Convert.ToInt32(externalChildDetectorsTable.Rows[i]["childDetectorStatus"])], externalChildDetectorsTable.Rows[i]["showedCount"].ToString(), externalChildDetectorsTable.Rows[i]["hitCount"].ToString()};
             }
         }
@@ -529,6 +508,9 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             foreach (var detectorItem in lists1)
             {
                 detectorInfo = new List<string>();
+            //     res.AddInsight(InsightStatus.Warning, detectorItem.ToString());
+
+         // Info split on: "ChildDetectorName":"Check Swap Operations","ChildDetectorId":"swap","ChildDetectorStatus":0,"ChildDetectorLoadingStatus":1
                 var info = detectorItem.Split(new string[] {","}, StringSplitOptions.RemoveEmptyEntries);
                 var childDetectorName = "";
                 var childDetectorId = "";
@@ -582,6 +564,7 @@ private static string GetAllChildDetectorsQuery(string dataSource, DataTable int
             foreach (var detectorItem in lists1)
             {
                 detectorInfo = new List<string>();
+            //     res.AddInsight(InsightStatus.Warning, detectorItem.ToString());
                 var info = detectorItem.Split(new string[] {","}, StringSplitOptions.RemoveEmptyEntries);
                 var childDetectorName = "";
                 var childDetectorId = "";
@@ -670,31 +653,7 @@ private static string GetSupportTopicMapQuery(string id, string pesId, string ti
 
 // }
 
-private static string GetDeflectionTable(bool isSolution, string timeRange)
-{
-    string tableName = "";
 
-    // For testing purpose, Use the monthly table first
-    // if (timeRange == "168h") {
-    //     if (isSolution)
-    //         tableName =  "SupportProductionDeflectionMonthlyPoPInsightsVer1023";
-    //     else 
-    //         tableName =  "SupportProductionDeflectionMonthlyVer1023";
-    // }
-    if (timeRange == "168h") {
-        if (isSolution)
-            tableName =  "SupportProductionDeflectionWeeklyPoPInsightsVer1023";
-        else 
-            tableName =  "SupportProductionDeflectionWeeklyVer1023";
-    }
-    else if (timeRange == "720h") {
-        if (isSolution)
-            tableName =  "SupportProductionDeflectionMonthlyPoPInsightsVer1023";
-        else 
-            tableName =  "SupportProductionDeflectionMonthlyVer1023";
-    }
-    return tableName;
-}
 
 [SystemFilter]
 [Definition(Id = "__analytics", Name = "Business analytics", Author = "xipeng,shgup", Description = "")]
@@ -704,20 +663,11 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string dataSource = cxt["dataSource"].ToString();
     string timeRange = cxt["timeRange"].ToString() + "h";
     string timeGrain = "30m";
-    string deflectionTableName = "";
-    bool isSolution = false;
-    string deflectionTimeRange = "Month";
 
     if (timeRange == "72h")
         timeGrain = "60m";
-    else if (timeRange == "168h") {
+    else if (timeRange == "168h")
         timeGrain = "180m";
-        deflectionTimeRange = "Week";
-    }
-    else if (timeRange == "720h") {
-        timeGrain = "720";
-        deflectionTimeRange = "Month";
-    }
 
     var uniqueSubscription = await dp.Kusto.ExecuteClusterQuery(GetUniqueSubscriptionQuery(detectorId, dataSource, timeRange));
     var uniqueResource = await dp.Kusto.ExecuteClusterQuery(GetUniqueResourceQuery(detectorId, dataSource, timeRange));
@@ -728,8 +678,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string deflectionCount = "0";
     string deflectionMonth = "";
 
-    List<Task<DataTable>> deflectionTrendTasks = new List<Task<DataTable>>();
-    Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
 
     SupportTopic[] supportTopicList = null;
     if (cxt.ContainsKey("supportTopicList"))
@@ -750,6 +698,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         foreach (var topic in supportTopicList)
         {
             var json = JsonConvert.SerializeObject(topic);
+            res.AddInsight(InsightStatus.Success, json.ToString());
 
             // Example output: FullId, PesId, Id, TopicL2, TopicL3
            supportTopicMapTasks.Add(dp.Kusto.ExecuteClusterQuery(GetSupportTopicMapQuery(topic.Id, topic.PesId, timeRange)));
@@ -758,28 +707,28 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         var supportTopicTasksList = await Task.WhenAll(supportTopicMapTasks);
 
        // supportTopicMapping holds the ID/PesId mapping to support topic L2/L3.
-    
-
+        Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
         if (supportTopicTasksList != null && supportTopicTasksList.Length > 0)
         {
             foreach (var table in supportTopicTasksList)
             {
+                res.AddInsight(InsightStatus.Warning, table.Rows.Count.ToString());
                 if (table != null && table.Rows != null && table.Rows.Count > 0)
                 {
                     string supportTopicKey = table.Rows[0]["FullId"].ToString();
                     supportTopicMapping[table.Rows[0]["FullId"].ToString()] = new Tuple<string, string, string, string>(table.Rows[0]["PesId"].ToString(), table.Rows[0]["Id"].ToString(), table.Rows[0]["TopicL2"].ToString(), table.Rows[0]["TopicL3"].ToString());
+
+                    res.AddInsight(InsightStatus.Warning, supportTopicKey + "\\" + supportTopicMapping[supportTopicKey].Item1 + "\\"+ supportTopicMapping[supportTopicKey].Item2+ "\\"+ supportTopicMapping[supportTopicKey].Item3 +"\\"+ supportTopicMapping[supportTopicKey].Item4);
                 }
             }
         }
-
         foreach(var topic in supportTopicList)
         {
             var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
             if (supportTopicMapping.ContainsKey(fullId))
             {
              //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
-                deflectionTableName = GetDeflectionTable(isSolution, timeRange);
-                deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+                deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             }
         }
 
@@ -806,18 +755,10 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 deflectionPercentage = Math.Round(100.0 * totalNumerator / totalDenominator, 1);
 
                 deflectionCount = $"{deflectionPercentage} % ({Convert.ToInt64(totalNumerator)}/{Convert.ToInt64(totalDenominator)})";
-                deflectionMonth = $"({deflectionTimeRange} : {timePeriod.ToString("MM/yy")})";
-                if (deflectionTimeRange == "Week") {
-                    deflectionMonth = $"(Last {deflectionTimeRange})";
-                }
+                deflectionMonth = $"(Month : {timePeriod.ToString("MM/yy")})";
             }
         }
-        
-    //    var deflectionTrendTable = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
-
     }
-
-
 
     // AppInsights Table
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
@@ -917,85 +858,24 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
-    foreach(var topic in supportTopicList)
-        {
-            var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
-            if (supportTopicMapping.ContainsKey(fullId))
-            {
-             //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
-                deflectionTableName = GetDeflectionTable(isSolution, timeRange);
-                deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
-            }
-
-            
-            var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
-
-            if (deflectionTrendList != null && deflectionTrendList.Length > 0)
-            {
-                foreach(var table in deflectionTrendList)
-                {
-                    var deflectionTrendTableRendering = new DiagnosticData()
-                    {
-                        Table = table,
-                        //   RenderingProperties = new Rendering(RenderingType.Table)
-                        RenderingProperties = new TimeSeriesRendering()
-                        {
-                            Title = "Deflection Trend",
-                            GraphType = TimeSeriesType.BarGraph,
-                            GraphOptions = new
-                            {
-                                color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
-                                forceY = new int[] { 0, 5 },
-                                yAxis = new
-                                {
-                                    axisLabel = "DeflectionTrend"
-                                }
-                            }
-                        }
-                        // RenderingProperties = new Rendering(RenderingType.Table){
-                        //     Title = "Exceptions"
-                        // }
-                    };
-                    res.Dataset.Add(deflectionTrendTableRendering);
-                }
-            }
-        }
-
     return res;
 }
 
 #region Deflection Metrics
 
-private static string GetTotalDeflectionQuery(string tableName, string pesId, string category, string supportTopic)
+private static string GetTotalDeflectionQuery(string category, string supportTopic)
 {
-
     return $@"
     cluster('usage360').database('Product360').
-    {tableName}
+    SupportProductionDeflectionMonthlyVer1023
     | extend period = Timestamp
     | where period >= ago(60d)
     | where SupportTopicL2 =~ '{category}'
     | where SupportTopicL3 =~ '{supportTopic}'
-    | where(DerivedProductIDStr == @'{pesId}')
+    | where(DerivedProductIDStr == @'14748')
     | where DenominatorQuantity != 0 
     | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity),Numerator = sum(NumeratorQuantity), Denominator = sum(DenominatorQuantity) by period
     | top 1 by period desc
-    ";
-}
-
-private static string GetDeflectionBySuppportTopic(string tableName, string pesId, string category, string supportTopic)
-{
-    return $@"
-    cluster('usage360').database('Product360').
-    {tableName}
-    | where Timestamp >= ago(150d)
-    | where DerivedProductIDStr in ('{pesId}')
-    | where SupportTopicL2 contains '{category}'
-    | where SupportTopicL3 contains '{supportTopic}'
-    | where DenominatorQuantity != 0 
-    | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity), auxQty = sum(DenominatorQuantity) by Timestamp, ProductName
-    | project Timestamp , deflection = round(100 * qty, 2)
-    | sort by Timestamp asc
     ";
 }
 
