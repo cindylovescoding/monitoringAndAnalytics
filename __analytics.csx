@@ -724,7 +724,31 @@ private static string GetSupportTopicMapQuery(string id, string pesId, string ti
 
 // }
 
+private static string GetDeflectionTable(bool isSolution, string timeRange)
+{
+    string tableName = "";
 
+    // For testing purpose, Use the monthly table first
+    // if (timeRange == "168h") {
+    //     if (isSolution)
+    //         tableName =  "SupportProductionDeflectionMonthlyPoPInsightsVer1023";
+    //     else 
+    //         tableName =  "SupportProductionDeflectionMonthlyVer1023";
+    // }
+    if (timeRange == "168h") {
+        if (isSolution)
+            tableName =  "SupportProductionDeflectionWeeklyPoPInsightsVer1023";
+        else 
+            tableName =  "SupportProductionDeflectionWeeklyVer1023";
+    }
+    else if (timeRange == "720h") {
+        if (isSolution)
+            tableName =  "SupportProductionDeflectionMonthlyPoPInsightsVer1023";
+        else 
+            tableName =  "SupportProductionDeflectionMonthlyVer1023";
+    }
+    return tableName;
+}
 
 [SystemFilter]
 [Definition(Id = "__analytics", Name = "Business analytics", Author = "xipeng,shgup", Description = "")]
@@ -734,11 +758,21 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string dataSource = cxt["dataSource"].ToString();
     string timeRange = cxt["timeRange"].ToString() + "h";
     string timeGrain = "30m";
+    string deflectionTableName = "";
+    bool isSolution = false;
+    string deflectionTimeRange = "Month";
 
-    if (timeRange == "72h")
+    if (timeRange == "72h") {
         timeGrain = "60m";
-    else if (timeRange == "168h")
+    }
+    else if (timeRange == "168h") {
         timeGrain = "180m";
+        deflectionTimeRange = "Week";
+    }
+    else if (timeRange == "720h") {
+        timeGrain = "720m";
+        deflectionTimeRange = "Month";
+    }
 
     var uniqueSubscription = await dp.Kusto.ExecuteClusterQuery(GetUniqueSubscriptionQuery(detectorId, dataSource, timeRange));
     var uniqueResource = await dp.Kusto.ExecuteClusterQuery(GetUniqueResourceQuery(detectorId, dataSource, timeRange));
@@ -748,6 +782,9 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     string deflectionCount = "0";
     string deflectionMonth = "";
+
+    List<Task<DataTable>> deflectionTrendTasks = new List<Task<DataTable>>();
+    Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
 
 
     SupportTopic[] supportTopicList = null;
@@ -777,7 +814,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         var supportTopicTasksList = await Task.WhenAll(supportTopicMapTasks);
 
        // supportTopicMapping holds the ID/PesId mapping to support topic L2/L3.
-        Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
         if (supportTopicTasksList != null && supportTopicTasksList.Length > 0)
         {
             foreach (var table in supportTopicTasksList)
@@ -795,7 +831,9 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
             if (supportTopicMapping.ContainsKey(fullId))
             {
              //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
-                deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+        //        deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+                deflectionTableName = GetDeflectionTable(isSolution, timeRange);
+                deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             }
         }
 
@@ -822,7 +860,10 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 deflectionPercentage = Math.Round(100.0 * totalNumerator / totalDenominator, 1);
 
                 deflectionCount = $"{deflectionPercentage} % ({Convert.ToInt64(totalNumerator)}/{Convert.ToInt64(totalDenominator)})";
-                deflectionMonth = $"(Month : {timePeriod.ToString("MM/yy")})";
+                deflectionMonth = $"({deflectionTimeRange} : {timePeriod.ToString("MM/yy")})";
+                if (deflectionTimeRange == "Week") {
+                    deflectionMonth = $"(Last {deflectionTimeRange})";
+                }
             }
         }
     }
@@ -926,6 +967,49 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         res.AddInsight(allDetectors);
     }
 
+     foreach(var topic in supportTopicList)
+    {
+        var fullId = topic.PesId.ToString() + @"\" +  topic.Id.ToString();
+        if (supportTopicMapping.ContainsKey(fullId))
+        {
+            //    deflectionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(supportTopicMap[topic.Id].Item1, supportTopicMap[topic.Id].Item2)));
+            deflectionTableName = GetDeflectionTable(isSolution, timeRange);
+            deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(deflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+        }
+    }
+
+            var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
+
+        if (deflectionTrendList != null && deflectionTrendList.Length > 0)
+        {
+            foreach(var table in deflectionTrendList)
+            {
+                var deflectionTrendTableRendering = new DiagnosticData()
+                {
+                    Table = table,
+                       RenderingProperties = new Rendering(RenderingType.Table)
+                    // RenderingProperties = new TimeSeriesRendering()
+                    // {
+                    //     Title = "Deflection Trend",
+                    //     GraphType = TimeSeriesType.BarGraph,
+                    //     GraphOptions = new
+                    //     {
+                    //         color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
+                    //         forceY = new int[] { 0, 5 },
+                    //         yAxis = new
+                    //         {
+                    //             axisLabel = "DeflectionTrend"
+                    //         }
+                    //     }
+                    // }
+                    // RenderingProperties = new Rendering(RenderingType.Table){
+                    //     Title = "Exceptions"
+                    // }
+                };
+                res.Dataset.Add(deflectionTrendTableRendering);
+            }
+        }
+
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
 
     return res;
@@ -933,19 +1017,35 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
 #region Deflection Metrics
 
-private static string GetTotalDeflectionQuery(string category, string supportTopic)
+private static string GetTotalDeflectionQuery(string tableName, string pesId, string category, string supportTopic)
 {
     return $@"
     cluster('usage360').database('Product360').
-    SupportProductionDeflectionMonthlyVer1023
+    {tableName}
     | extend period = Timestamp
     | where period >= ago(60d)
     | where SupportTopicL2 =~ '{category}'
     | where SupportTopicL3 =~ '{supportTopic}'
-    | where(DerivedProductIDStr == @'14748')
+    | where(DerivedProductIDStr == @'{pesId}')
     | where DenominatorQuantity != 0 
     | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity),Numerator = sum(NumeratorQuantity), Denominator = sum(DenominatorQuantity) by period
     | top 1 by period desc
+    ";
+}
+
+private static string GetDeflectionBySuppportTopic(string tableName, string pesId, string category, string supportTopic)
+{
+    return $@"
+    cluster('usage360').database('Product360').
+    {tableName}
+    | where Timestamp >= ago(150d)
+    | where DerivedProductIDStr in ('{pesId}')
+    | where SupportTopicL2 contains '{category}'
+    | where SupportTopicL3 contains '{supportTopic}'
+    | where DenominatorQuantity != 0 
+    | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity), auxQty = sum(DenominatorQuantity) by Timestamp, ProductName
+    | project Timestamp , deflection = round(100 * qty, 2)
+    | sort by Timestamp asc
     ";
 }
 
