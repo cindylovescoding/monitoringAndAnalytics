@@ -34,6 +34,18 @@ private static string GetUniqueSubscriptionQuery(string detectorId, string dataS
     ";
 }
 
+private static string GetAllInsightsCount(string detectorId, string timeRange)
+{
+    return
+    $@" customEvents 
+    | where timestamp >= ago({timeRange}) 
+    | where name contains 'InsightsSummary' and customDimensions.DetectorId contains '{detectorId}'
+    | project timestamp, customDimensions = todynamic(tostring(customDimensions)), insightsSummary =  todynamic(tostring(customDimensions.InsightsSummary)),  insightsList =  todynamic(tostring(customDimensions.InsightsList))
+    | extend TotalCount = tolong(insightsSummary.Total), CriticalCount = tolong(insightsSummary.Critical), WarningCount = tolong(insightsSummary.Warning), SuccessCount = tolong(insightsSummary.Success), InfoCount = tolong(insightsSummary.Info),  DefaultCount = tolong(insightsSummary.Default)
+    | summarize TotalCount = sum(TotalCount),  CriticalCount = sum(CriticalCount),  WarningCount = sum(WarningCount),  SuccessCount = sum(SuccessCount), InfoCount = sum(InfoCount), DefaultCount = sum(DefaultCount)
+    ";
+}
+
 private static string GetUniqueResourceQuery(string detectorId, string dataSource, string timeRange)
 {
     string tableName = GetTableName(dataSource, timeRange);
@@ -90,6 +102,45 @@ private static string GetCustomEventsInsightsCount(string detectorId, string tim
     | summarize HitCount = count() by tostring(customDimensions.Title)
     | summarize count()
     ";
+}
+
+private static string GetTotalInsightsMarkdown (string dataSource, DataTable internalAllInsightsCount, DataTable externalAllInsightsCount, out string criticalInsightsCount)
+{
+    Dictionary<string, long> allhash = new Dictionary<string, long>();
+    string[] insightStatus = new string[6]{"TotalCount", "CriticalCount", "WarningCount", "SuccessCount", "InfoCount", "DefaultCount"};
+    long[] insightStatusCount = new long[6];
+    if (dataSource != "2")
+    {
+        for (int i = 0; i < insightStatusCount.Length; i++)
+        {
+            insightStatusCount[i] += Convert.ToInt64(internalAllInsightsCount.Rows[0][insightStatus[i]]);
+        }
+    }
+
+    if (dataSource != "1")
+    {
+        for (int i = 0; i < insightStatusCount.Length; i++)
+        {
+            insightStatusCount[i] += Convert.ToInt64(externalAllInsightsCount.Rows[0][insightStatus[i]]);
+        }
+    }
+
+    string markdown = @"<markdown>";
+    markdown += $@"
+    | Total | Critical | Warning | Success | Info |  Default |
+    | :---: | :---:| :---:| :---:| :---:| :---:|
+    ";
+        
+    foreach (var statusCount in insightStatusCount)
+    {
+        markdown += $@"| `{statusCount.ToString()}` ";
+    }
+
+    markdown += $@"|";
+    markdown += "</markdown>";
+
+    criticalInsightsCount = insightStatusCount[1].ToString();
+    return markdown;
 }
 
 private static string GetAllCustomEventsQuery(string dataSource, DataTable externalInsightsTable, DataTable internalInsightsTable)
@@ -176,12 +227,12 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string detectorId = cxt["detectorId"].ToString();
     string dataSource = cxt["dataSource"].ToString();
     string timeRange = cxt["timeRange"].ToString() + "h";
-    string timeGrain = "5m";
+    string timeGrain = "30m";
 
     if (timeRange == "72h")
-        timeGrain = "15m";
+        timeGrain = "60m";
     else if (timeRange == "168h")
-        timeGrain = "1h";
+        timeGrain = "180m";
 
     var uniqueSubscription = await dp.Kusto.ExecuteClusterQuery(GetUniqueSubscriptionQuery(detectorId, dataSource, timeRange));
     var uniqueResource = await dp.Kusto.ExecuteClusterQuery(GetUniqueResourceQuery(detectorId, dataSource, timeRange));
@@ -242,11 +293,11 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         }
     }
 
+    string criticalInsightsCount = "0";
     var ds1 = new DataSummary($"Case Deflection {deflectionMonth}", $"{deflectionCount}", "yellowgreen");
 
     var ds2 = new DataSummary("Unique Subs", "0", "blue");
     var ds3 = new DataSummary("Unique Resources", "0", "yellow");
-    var ds5 = new DataSummary("Critical Insights", "0", "orangered");
     // limegreen orangered yellow
     if (uniqueSubscription.Rows.Count > 0)
     {
@@ -261,13 +312,17 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     // AppInsights Table
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
     var internalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
+    var internalAllInsightsCount = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsCount(detectorId, timeRange));
 
     await dp.AppInsights.SetAppInsightsKey("bda43898-4456-4046-9a7c-9ffa83f47c33", "2ejbz8ipv8uzgq14cjyqsimvh0hyjoxjcr7mpima");
     var externalInsightsTable = await dp.AppInsights.ExecuteAppInsightsQuery(GetInsightsQuery(detectorId, timeRange));
+    var externalAllInsightsCount = await dp.AppInsights.ExecuteAppInsightsQuery(GetAllInsightsCount(detectorId, timeRange));
 
+    string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount, out criticalInsightsCount);
     expandedTimes = GetInsightsExpandedTimes(dataSource, externalInsightsTable, internalInsightsTable);
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
-    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4 });
+    var ds5 = new DataSummary("Critical Insights", criticalInsightsCount, "orangered");
+    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4, ds5 });
 
     // Unique subscriptions and resources graph
     var usersandResourcesRangeTable = new DiagnosticData()
@@ -294,8 +349,9 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     Dictionary<string, string> insightsBody = new Dictionary<string, string>();
     string markdownstr = GetAllCustomEventsQuery(dataSource, externalInsightsTable, internalInsightsTable);
-    insightsBody.Add("Insights Ranking", markdownstr);
-    Insight allInsight = new Insight(InsightStatus.Success, "💖 Top 5 expanded Insights", insightsBody, true);
+    insightsBody.Add("Insights status", totalInsightsMarkdown);
+    insightsBody.Add("Top 5 Expanded Insights", markdownstr);
+    Insight allInsight = new Insight(InsightStatus.Success, "💖 Insights Summary", insightsBody, true);
 
     res.AddInsight(allInsight);
 
