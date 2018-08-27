@@ -1,4 +1,4 @@
- using System.Linq;
+using System.Linq;
 using Diagnostics.ModelsAndUtils.Models;
 using System.Reflection;
 
@@ -995,11 +995,34 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 var deflectionTrendTableRendering = new DiagnosticData()
                 {
                     Table = table,
+                     //  RenderingProperties = new Rendering(RenderingType.Table)
+                    RenderingProperties = new TimeSeriesRendering()
+                    {
+                        Title = "Deflection Trend",
+                        GraphType = TimeSeriesType.LineGraph,
+                        GraphOptions = new
+                        {
+                            color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
+                            forceY = new int[] { 0, 5 },
+                            yAxis = new
+                            {
+                                axisLabel = "DeflectionTrend"
+                            },
+                            customizeX = "true"
+                        }
+                    }
+                    // RenderingProperties = new Rendering(RenderingType.Table){
+                    //     Title = "Exceptions"
+                    // }
+                };
+                var deflectionTrendTableRendering1 = new DiagnosticData()
+                {
+                    Table = table,
                        RenderingProperties = new Rendering(RenderingType.Table)
                     // RenderingProperties = new TimeSeriesRendering()
                     // {
                     //     Title = "Deflection Trend",
-                    //     GraphType = TimeSeriesType.BarGraph,
+                    //     GraphType = TimeSeriesType.LineGraph,
                     //     GraphOptions = new
                     //     {
                     //         color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
@@ -1015,6 +1038,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                     // }
                 };
                 res.Dataset.Add(deflectionTrendTableRendering);
+                res.Dataset.Add(deflectionTrendTableRendering1);
             }
         }
     }
@@ -1063,7 +1087,7 @@ private static string GetDeflectionBySolution(string tableName, string pesId, st
     | limit 100
     | project C_ID, C_Name = iif(isempty(C_Name),C_ID,C_Name), Current, CurPer, Previous, PrevPer, Change, PreviousN, NPrevPer
     | order by Current desc, Previous desc, PreviousN desc
-    | project Id = C_ID, Name = C_Name, Current = CurPer, CurrentNumerator = CurPer * Current, CurrentDenominator = Current, Previous = PrevPer, PreviousNumerator = PrevPer * Previous, PreviousDenominator = Previous, Change, 12WeeksPrior = NPrevPer
+    | project Id = C_ID, Name = C_Name, Current = CurPer, CurrentNumerator = CurPer * Current, CurrentDenominator = round(Current, 2), Previous = PrevPer, PreviousNumerator = PrevPer * Previous, PreviousDenominator = round(Previous,2), Change, 12WeeksPrior = NPrevPer
     | project Name , CurrentDeflection = round(Current*100.0,2),  CurrentNumerator, CurrentDenominator , PreviousDeflection = round(Previous *100.0,2),  PreviousNumerator, PreviousDenominator
     ";
 }
