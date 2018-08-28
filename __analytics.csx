@@ -992,6 +992,23 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         {
             foreach(var table in deflectionTrendList)
             {
+               int length = table.Rows.Count;
+               int[] indexes = new int[]{0, length-1};
+               if (length-1 > 0) {
+                    for (int i = 0; i < indexes.Length; i++)
+                    {
+                        string value = "";
+
+                        foreach (var col in table.Columns) {
+                            value = !String.IsNullOrEmpty(table.Rows[i][col.ToString()].ToString()) ? table.Rows[i][col.ToString()].ToString() : "";
+                        }   
+
+                        foreach (var col in table.Columns) {
+                            table.Rows[i][col.ToString()] = value;
+                        }   
+                    }
+               }
+  
                 var deflectionTrendTableRendering = new DiagnosticData()
                 {
                     Table = table,
