@@ -1,4 +1,4 @@
-using System.Linq;
+ using System.Linq;
 using Diagnostics.ModelsAndUtils.Models;
 using System.Reflection;
 
@@ -1092,7 +1092,7 @@ private static string GetDeflectionBySolution(string tableName, string pesId, st
     ";
 }
 
-private static string GetDeflectionBySuppportTopic(string tableName, string pesId, string category, string supportTopic)
+private static string GetDeflectionBySuppportTopic1(string tableName, string pesId, string category, string supportTopic)
 {
     return $@"
     cluster('usage360').database('Product360').
@@ -1107,6 +1107,36 @@ private static string GetDeflectionBySuppportTopic(string tableName, string pesI
     | sort by Timestamp asc
     ";
 }
+
+private static string GetDeflectionBySuppportTopic(string tableName, string pesId, string category, string supportTopic)
+{
+    return $@"
+    cluster('usage360').database('Product360').
+    SupportProductionDeflectionWeeklyVer1023
+    | where Timestamp >= ago(150d)
+    | where DerivedProductIDStr in ('{pesId}')
+    | where SupportTopicL2 contains '{category}'
+    | where SupportTopicL3 contains '{supportTopic}'
+    | where DenominatorQuantity != 0 
+    | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity), auxQty = sum(DenominatorQuantity) by Timestamp, ProductName
+    | project Timestamp , WeeklyDeflection = round(100 * qty, 2)
+    | sort by Timestamp asc
+    | union (
+        cluster('usage360').database('Product360').
+        SupportProductionDeflectionMonthlyVer1023
+        | where Timestamp >= ago(150d)
+        | where DerivedProductIDStr in ('{pesId}')
+        | where SupportTopicL2 contains '{category}'
+        | where SupportTopicL3 contains '{supportTopic}'
+        | where DenominatorQuantity != 0 
+        | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity), auxQty = sum(DenominatorQuantity) by Timestamp, ProductName
+        | project Timestamp , MonthlyDeflection = round(100 * qty, 2)
+        | sort by Timestamp asc
+    )
+    | sort by Timestamp asc
+    ";
+}
+
 
 // TODO : This is a Hack right now and we should figure out a way to programatically get this.
 
