@@ -757,10 +757,15 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string timeGrain = "30m";
     string weeklyDeflectionTableName = "";
     string monthlyDeflectionTableName = "";
+    string weeklyDeflectionSumTable = "";
+    string monthlyDeflectionSumTable = "";
     string deflectionSolutionTable = "";
     string deflectionTable = "";
     bool isSolution = false;
     string deflectionTimeRange = "Month";
+
+    string[] deflectionCount = new String[2] {"0", "0"}; 
+    string[] deflectionMonth = new String[2] {"", ""};
 
     if (timeRange == "72h") {
         timeGrain = "60m";
@@ -779,12 +784,10 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string criticalInsightsCount = "0";
     long expandedTimes = 0;
 
-    string deflectionCount = "0";
-    string deflectionMonth = "";
-
 
     List<Task<DataTable>> deflectionTrendTasks = new List<Task<DataTable>>();
     List<Task<DataTable>> deflectionSolutionTasks = new List<Task<DataTable>>();
+    Dictionary<String, DataTable> deflectionTrendTasksMapping = new Dictionary<String, DataTable>();
     Dictionary<String, DataTable> deflectionSolutionTasksMapping = new Dictionary<String, DataTable>();
 
     Dictionary<string, Tuple<string, string, string, string>> supportTopicMapping = new Dictionary<string, Tuple<string, string, string, string>>();
@@ -798,11 +801,13 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     if(supportTopicList == null || supportTopicList.Length == 0)
     {
-        deflectionCount = "N/A";
+        deflectionCount[0] = "N/A";
+        deflectionCount[1]= "N/A";
     }
     else
     {
-        List<Task<DataTable>> deflectionSumTasks = new List<Task<DataTable>>();
+        List<Task<DataTable>> deflectionWeeklySumTasks = new List<Task<DataTable>>();
+         List<Task<DataTable>> deflectionMonthlySumTasks = new List<Task<DataTable>>();
         List<Task<DataTable>> supportTopicMapTasks = new List<Task<DataTable>>();
 
         foreach (var topic in supportTopicList)
@@ -836,47 +841,72 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
             {
                 weeklyDeflectionTableName = GetDeflectionTrendTable(true);
                 monthlyDeflectionTableName = GetDeflectionTrendTable(false);
-                deflectionTable = GetDeflectionTable(false, timeRange);
+                weeklyDeflectionSumTable = GetDeflectionTable(false, "168h");
+                monthlyDeflectionSumTable = GetDeflectionTable(false, "720h");
                 deflectionSolutionTable = GetDeflectionTable(true, timeRange);
 
-                deflectionSumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(deflectionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+                deflectionWeeklySumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(weeklyDeflectionSumTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+                deflectionMonthlySumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(monthlyDeflectionSumTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
                 deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(weeklyDeflectionTableName, monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
-                deflectionSolutionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
+        //        deflectionSolutionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             //    deflectionSolutionTasksMapping.Add((supportTopicMapping[fullId].Item2, dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4))));
-                deflectionSolutionTasksMapping[supportTopicMapping[fullId].Item2] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+                string spKey = " [" + supportTopicMapping[fullId].Item2 + "] ";
+                if (!String.IsNullOrEmpty(supportTopicMapping[fullId].Item3)) {
+                    spKey += supportTopicMapping[fullId].Item3;
+                }
+
+                if (!String.IsNullOrEmpty(supportTopicMapping[fullId].Item4)) {
+                    spKey += " - " + supportTopicMapping[fullId].Item4;
+                }
+
+                deflectionTrendTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(weeklyDeflectionTableName, monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+                deflectionSolutionTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetOverallDeflectionBySolution(supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+
+                
             }
         }
 
-        var deflectionTableList = await Task.WhenAll(deflectionSumTasks);
+        var weeklyDeflectionTableList = await Task.WhenAll(deflectionWeeklySumTasks);
+        var monthlyDeflectionTableList = await Task.WhenAll(deflectionMonthlySumTasks);
 
-        if (deflectionTableList != null && deflectionTableList.Length > 0)
-        {
-            double totalNumerator = 0;
-            double totalDenominator = 0;
-            double deflectionPercentage = 0;
-            DateTime timePeriod = DateTime.UtcNow.AddMonths(-1);
-            foreach(var table in deflectionTableList)
+        List<DataTable[]> deflectionSumTableList = new List<DataTable[]> ();
+        deflectionSumTableList.Add(weeklyDeflectionTableList);
+        deflectionSumTableList.Add(monthlyDeflectionTableList);
+
+        for (int i = 0; i < deflectionSumTableList.Count ; i++) {
+            var deflectionTableList = deflectionSumTableList[i];
+
+            if (deflectionTableList != null && deflectionTableList.Length > 0)
             {
-                if(table != null && table.Rows != null && table.Rows.Count > 0)
+                double totalNumerator = 0;
+                double totalDenominator = 0;
+                double deflectionPercentage = 0;
+                DateTime timePeriod = DateTime.UtcNow.AddMonths(-1);
+                foreach(var table in deflectionTableList)
                 {
-                    totalNumerator += Convert.ToDouble(table.Rows[0]["Numerator"].ToString());
-                    totalDenominator += Convert.ToDouble(table.Rows[0]["Denominator"].ToString());
-                    timePeriod = DateTime.Parse(table.Rows[0]["period"].ToString());
+                    if(table != null && table.Rows != null && table.Rows.Count > 0)
+                    {
+                        totalNumerator += Convert.ToDouble(table.Rows[0]["Numerator"].ToString());
+                        totalDenominator += Convert.ToDouble(table.Rows[0]["Denominator"].ToString());
+                        timePeriod = DateTime.Parse(table.Rows[0]["period"].ToString());
+                    }
                 }
-            }
 
-            if(totalDenominator != 0)
-            {
-                deflectionPercentage = Math.Round(100.0 * totalNumerator / totalDenominator, 1);
+                if(totalDenominator != 0)
+                {
+                    deflectionPercentage = Math.Round(100.0 * totalNumerator / totalDenominator, 1);
 
-                deflectionCount = $"{deflectionPercentage} % ({Convert.ToInt64(totalNumerator)}/{Convert.ToInt64(totalDenominator)})";
-                deflectionMonth = $"({deflectionTimeRange} : {timePeriod.ToString("MM/yy")})";
-                if (deflectionTimeRange == "Week") {
-                    deflectionMonth = $"(Last {deflectionTimeRange})";
+                    deflectionCount[i] = $"{deflectionPercentage} % ({Convert.ToInt64(totalNumerator)}/{Convert.ToInt64(totalDenominator)})";
+                    deflectionMonth[i] = $"(Last Month : {timePeriod.ToString("MM/yy")})";
+                    if (i == 0) {
+                        deflectionMonth[i] = $"(Last {deflectionTimeRange})";
+                    }
                 }
             }
         }
     }
+
+
 
     // AppInsights Table
     await dp.AppInsights.SetAppInsightsKey("73bff7df-297f-461e-8c14-377774ae7c12", "vkd6p42lgxcpeh04dzrwayp8zhhrfoeaxtcagube");
@@ -902,7 +932,10 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     string totalInsightsMarkdown= GetTotalInsightsMarkdown(dataSource, internalAllInsightsCount, externalAllInsightsCount, out criticalInsightsCount);
 
-    var ds1 = new DataSummary($"Case Deflection {deflectionMonth}", $"{deflectionCount}", "yellowgreen");
+// Weekly case deflection
+    //deepskyblue yellowgreen
+    var ds1 = new DataSummary($"Case Deflection {deflectionMonth[0]}", $"{deflectionCount[0]}", "darkturquoise");
+    var monthlyds = new DataSummary($"Case Deflection {deflectionMonth[1]}", $"{deflectionCount[1]}", "yellowgreen");
     var ds2 = new DataSummary("Unique Subs", "0", "blue");
     var ds3 = new DataSummary("Unique Resources", "0", "yellow");
     // limegreen orangered yellow
@@ -917,24 +950,24 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     }
     var ds4 = new DataSummary("Insights Expanded", expandedTimes.ToString(), "mediumpurple");
     var ds5 = new DataSummary("Critical Insights", criticalInsightsCount, "orangered");
-    res.AddDataSummary(new List<DataSummary>() { ds1, ds2, ds3, ds4, ds5 });
+    res.AddDataSummary(new List<DataSummary>() { ds1, monthlyds, ds2, ds3, ds4, ds5 });
 
 
     if(supportTopicList != null && supportTopicList.Length > 0) {
 
         
-        foreach (KeyValuePair<String, DataTable> kvp in deflectionSolutionTasksMapping) 
-        {
-            string title = "Deflection by solutions [" + kvp.Key + "]"; 
-            var deflectionbySolutionWithId = new DiagnosticData() 
-            {
-                Table = kvp.Value,
-                RenderingProperties = new Rendering(RenderingType.Table) {
-                    Title = title
-                }
-            };
-            res.Dataset.Add(deflectionbySolutionWithId);
-        }
+        // foreach (KeyValuePair<String, DataTable> kvp in deflectionSolutionTasksMapping) 
+        // {
+        //     string title = "Deflection by solutions [" + kvp.Key + "]"; 
+        //     var deflectionbySolutionWithId = new DiagnosticData() 
+        //     {
+        //         Table = kvp.Value,
+        //         RenderingProperties = new Rendering(RenderingType.Table) {
+        //             Title = title
+        //         }
+        //     };
+        //     res.Dataset.Add(deflectionbySolutionWithId);
+        // }
 
         // Original Code Path
         // var deflectionSolutionList = await Task.WhenAll(deflectionSolutionTasks);
@@ -953,6 +986,104 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
         //         res.Dataset.Add(deflectionTrendTableRendering);
         //     }
         // }
+    }
+
+    if(supportTopicList != null && supportTopicList.Length > 0) {
+        List<Tuple<string, bool, Response>> dropdownData = new List<Tuple<string, bool, Response>>();
+        foreach (KeyValuePair<String, DataTable> kvp in deflectionTrendTasksMapping)
+        {
+            Response deflectionResponse = new Response();
+            var table = kvp.Value;
+            if (table != null) {
+                // Converge the start/end point for weekly/monthly deflection
+                int length = table.Rows.Count;
+                int[] indexes = new int[]{0, length-1};
+                if (length-1 > 0) {
+                    for (int i = 0; i < indexes.Length; i++)
+                    {
+                        int index = indexes[i];
+                        var value = (object)null;
+
+                        for (int j = 1; j < table.Columns.Count; j++) {
+                            if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
+                                value = table.Rows[index][j];
+                                break;
+                            }
+                        }
+
+                        for (int j = 1; j < table.Columns.Count; j++) {
+                            table.Rows[index][j] = value;
+                        }
+                    }
+                }
+
+            deflectionResponse.Dataset.Add(new DiagnosticData()
+            {
+                Table = table,
+                RenderingProperties = new TimeSeriesRendering()
+                    {
+                 //       Title = "Deflection Trend",
+                        GraphType = TimeSeriesType.LineGraph,
+                        GraphOptions = 
+                        {
+                            color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
+                            forceY = new int[] { 0, 5 },
+                            yAxis = new
+                            {
+                                axisLabel = "DeflectionTrend"
+                            },
+                            customizeX = "true"
+                        }
+                    }
+            });
+
+
+                    deflectionResponse.AddInsight(new Insight(InsightStatus.None, "✨ Deflection Table "));
+             //   Deflection by solution table
+            if (deflectionSolutionTasksMapping[kvp.Key] != null) {
+
+                var overallDtable = deflectionSolutionTasksMapping[kvp.Key];
+                string str1 = GetOverallDeflectionMarkDownString(overallDtable);
+
+                  //  Dictionary<string, string> insightsMappingBody = new Dictionary<string, string>();
+
+
+    Dictionary<string, string> insightbody = new Dictionary<string, string>();
+    insightbody.Add("Deflection Percentage", str1);
+
+    deflectionResponse.AddInsight(new Insight(InsightStatus.None, "✨ Deflection Table ", insightbody, true));
+
+
+
+    
+
+                var deflectionbySolutionWithId = new DiagnosticData() 
+                {
+                    Table = deflectionSolutionTasksMapping[kvp.Key],
+                    RenderingProperties = new Rendering(RenderingType.Table) {
+                    //  Title = title
+                    }
+                };
+                deflectionResponse.Dataset.Add(deflectionbySolutionWithId);
+            }
+
+
+
+            // Add new rendering response
+        
+
+
+
+            dropdownData.Add(new Tuple<string, bool, Response>(
+            $"{kvp.Key}",
+            true,
+            deflectionResponse));
+            }
+        }
+
+        string label = "Select support topic here";
+        Dropdown dropdown = new Dropdown(label, dropdownData);
+        res.AddDropdownView(dropdown, "Deflection Analysis by Support Topic");
     }
 
     // Unique subscriptions and resources graph
@@ -995,7 +1126,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     markdownstr = "";
 
   //  Dictionary<string, string> insightsMappingBody = new Dictionary<string, string>();
-      string insightsMappingMarkdown = GetInsightsExpandedMapping(dataSource, internalInsightsSummary, externalInsightsSummary, topInsights);
+    string insightsMappingMarkdown = GetInsightsExpandedMapping(dataSource, internalInsightsSummary, externalInsightsSummary, topInsights);
     markdownstr = insightsMappingMarkdown;
     if (!String.IsNullOrEmpty(markdownstr)) {
         insightssummaryBody.Add("Insights Summary", markdownstr);
@@ -1016,80 +1147,148 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     // Not working part:
 
     if(supportTopicList != null && supportTopicList.Length > 0) {
+        // List<Tuple<string, bool, Response>> dropdownData = new List<Tuple<string, bool, Response>>();
+        // foreach (KeyValuePair<String, DataTable> kvp in deflectionTrendTasksMapping)
+        // {
+        //     var table = kvp.Value;
+        //     Response deflectionResponse = new Response();
+        //     if (table != null) {
+        //         // Converge the start/end point for weekly/monthly deflection
+        //         int length = table.Rows.Count;
+        //         int[] indexes = new int[]{0, length-1};
+        //         if (length-1 > 0) {
+        //             for (int i = 0; i < indexes.Length; i++)
+        //             {
+        //                 int index = indexes[i];
+        //                 var value = (object)null;
 
-        var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
+        //                 for (int j = 1; j < table.Columns.Count; j++) {
+        //                     if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
+        //                         value = table.Rows[index][j];
+        //                         break;
+        //                     }
+        //                 }
 
-        if (deflectionTrendList != null && deflectionTrendList.Length > 0)
-        {
-            foreach(var table in deflectionTrendList)
-            {
-               int length = table.Rows.Count;
-               int[] indexes = new int[]{0, length-1};
-               if (length-1 > 0) {
-                    for (int i = 0; i < indexes.Length; i++)
-                    {
-                        int index = indexes[i];
-                        var value = (object)null;
+        //                 for (int j = 1; j < table.Columns.Count; j++) {
+        //                     table.Rows[index][j] = value;
+        //                 }
+        //             }
+        //         }
 
-                        for (int j = 1; j < table.Columns.Count; j++) {
-                          if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
-                                value = table.Rows[index][j];
-                                break;
-                            }
-                        }
+        //     // Add new rendering response
+        
+        //     deflectionResponse.Dataset.Add(new DiagnosticData()
+        //     {
+        //         Table = table,
+        //         RenderingProperties = new TimeSeriesRendering()
+        //             {
+        //          //       Title = "Deflection Trend",
+        //                 GraphType = TimeSeriesType.LineGraph,
+        //                 GraphOptions = new
+        //                 {
+        //                     color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
+        //                     forceY = new int[] { 0, 5 },
+        //                     yAxis = new
+        //                     {
+        //                         axisLabel = "DeflectionTrend"
+        //                     },
+        //                     customizeX = "true"
+        //                 }
+        //             }
+        //     });
 
-                        for (int j = 1; j < table.Columns.Count; j++) {
-                            table.Rows[index][j] = value;
-                        }
-                    }
-               }
+        //     dropdownData.Add(new Tuple<string, bool, Response>(
+        //     $"Support Topic Id: {kvp.Key}",
+        //     false,
+        //     deflectionResponse));
+        //     }
+        // }
+
+        // string label = "Select support topic here";
+        // Dropdown dropdown = new Dropdown(label, dropdownData);
+        // res.AddDropdownView(dropdown);
+
+
+        
+
+
+        // string label = "select support topic here";
+        // List<Tuple<string, bool, Response>> data = new List<Tuple<string, bool, Response>>();
+
+        // string firstDataKey = "key1";
+        // bool selected = true;
+        // var firstDataEntry = new Response();
+        // firstDataEntry.AddMarkdownView(@"some markdown content");
+
+        // data.Add(new Tuple<string, bool, Response>(firstDataKey, selected, firstDataEntry));
+
+        // Dropdown dropdownViewModel = new Dropdown(label, data);
+        // res.AddDropdownView(dropdownViewModel);
+
+
+
+
+
+
+            // Original DeflectionTrend without dropdown
+
+        // var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
+
+        // if (deflectionTrendList != null && deflectionTrendList.Length > 0)
+        // {
+
+        //     foreach(var table in deflectionTrendList)
+        //     {
+        //        int length = table.Rows.Count;
+        //        int[] indexes = new int[]{0, length-1};
+        //        if (length-1 > 0) {
+        //             for (int i = 0; i < indexes.Length; i++)
+        //             {
+        //                 int index = indexes[i];
+        //                 var value = (object)null;
+
+        //                 for (int j = 1; j < table.Columns.Count; j++) {
+        //                   if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
+        //                         value = table.Rows[index][j];
+        //                         break;
+        //                     }
+        //                 }
+
+        //                 for (int j = 1; j < table.Columns.Count; j++) {
+        //                     table.Rows[index][j] = value;
+        //                 }
+        //             }
+        //        }
   
-                var deflectionTrendTableRendering = new DiagnosticData()
-                {
-                    Table = table,
-                     //  RenderingProperties = new Rendering(RenderingType.Table)
-                    RenderingProperties = new TimeSeriesRendering()
-                    {
-                        Title = "Deflection Trend",
-                        GraphType = TimeSeriesType.LineGraph,
-                        GraphOptions = new
-                        {
-                            color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
-                            forceY = new int[] { 0, 5 },
-                            yAxis = new
-                            {
-                                axisLabel = "DeflectionTrend"
-                            },
-                            customizeX = "true"
-                        }
-                    }
-                };
-                var deflectionTrendTableRendering1 = new DiagnosticData()
-                {
-                    Table = table,
-                       RenderingProperties = new Rendering(RenderingType.Table)
-                    // RenderingProperties = new TimeSeriesRendering()
-                    // {
-                    //     Title = "Deflection Trend",
-                    //     GraphType = TimeSeriesType.LineGraph,
-                    //     GraphOptions = new
-                    //     {
-                    //         color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
-                    //         forceY = new int[] { 0, 5 },
-                    //         yAxis = new
-                    //         {
-                    //             axisLabel = "DeflectionTrend"
-                    //         }
-                    //     }
-                    // }
-                    // RenderingProperties = new Rendering(RenderingType.Table){
-                    //     Title = "Exceptions"
-                    // }
-                };
-                res.Dataset.Add(deflectionTrendTableRendering);
-                res.Dataset.Add(deflectionTrendTableRendering1);
-            }
-        }
+        //         var deflectionTrendTableRendering = new DiagnosticData()
+        //         {
+        //             Table = table,
+        //              //  RenderingProperties = new Rendering(RenderingType.Table)
+        //             RenderingProperties = new TimeSeriesRendering()
+        //             {
+        //                 Title = "Deflection Trend",
+        //                 GraphType = TimeSeriesType.LineGraph,
+        //                 GraphOptions = new
+        //                 {
+        //                     color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
+        //                     forceY = new int[] { 0, 5 },
+        //                     yAxis = new
+        //                     {
+        //                         axisLabel = "DeflectionTrend"
+        //                     },
+        //                     customizeX = "true"
+        //                 }
+        //             }
+        //         };
+        //         var deflectionTrendTableRendering1 = new DiagnosticData()
+        //         {
+        //             Table = table,
+        //             RenderingProperties = new Rendering(RenderingType.Table)
+        //         };
+        //         res.Dataset.Add(deflectionTrendTableRendering);
+        //         res.Dataset.Add(deflectionTrendTableRendering1);
+        //     }
+        // }
     }
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
@@ -1117,9 +1316,100 @@ private static string GetTotalDeflectionQuery(string tableName, string pesId, st
     ";
 }
 
+
+private static string GetOverallDeflectionBySolution(string pesId, string category, string supportTopic)
+{
+    string weeklyDeflectionTable = "SupportProductionDeflectionWeeklyPoPInsightsVer1023";
+    string monthlyDeflectionTable = "SupportProductionDeflectionMonthlyPoPInsightsVer1023";
+
+    return $@"
+     cluster('usage360').database('Product360').
+    {weeklyDeflectionTable}
+    | extend Current = CurrentDenominatorQuantity, Previous = PreviousDenominatorQuantity, PreviousN = PreviousNDenominatorQuantity , CurrentQ = CurrentNumeratorQuantity, PreviousQ = PreviousNumeratorQuantity, PreviousNQ = PreviousNNumeratorQuantity,  Change = CurrentNumeratorQuantity-PreviousNumeratorQuantity
+    | extend C_ID = SolutionType, C_Name = SolutionType
+    | where SupportTopicL2 contains '{category}'
+    | where SupportTopicL3 contains '{supportTopic}'
+    | where (DerivedProductIDStr == @'{pesId}')
+    | where C_ID != ''
+    | summarize C_Name=any(C_Name), Current= sum(Current), Previous = sum(Previous), PreviousN = sum(PreviousN), CurrentQ = sum(CurrentNumeratorQuantity), PreviousQ = sum(PreviousNumeratorQuantity), PreviousNQ = sum(PreviousNNumeratorQuantity) by C_ID | extend Change = Current - Previous
+    | extend CurPer = iff(Current == 0, todouble(''), CurrentQ/Current), PrevPer = iff(Previous == 0, todouble(''), PreviousQ/Previous), NPrevPer = iff(PreviousN == 0, todouble(''), PreviousNQ/PreviousN)
+    | order by Current desc, Previous desc, PreviousN desc
+    | limit 100
+    | project C_ID, C_Name = iif(isempty(C_Name),C_ID,C_Name), Current, CurPer, Previous, PrevPer, Change, PreviousN, NPrevPer
+    | order by Current desc, Previous desc, PreviousN desc
+    | project SolutionName = C_Name, CurrentWeeklyDeflection = round(CurPer*100.0,2), CurrentWeeklyNumerator = bin(CurPer * Current, 1), CurrentWeeklyDenominator = bin(Current, 1), PreviousWeeklyDeflection = round(PrevPer *100.0,2), PreviousWeeklyNumerator = PrevPer * Previous, PreviousWeeklyDenominator = bin(Previous,1)
+    | join kind= leftouter (
+    cluster('usage360').database('Product360').
+    {monthlyDeflectionTable}
+    | extend Current = CurrentDenominatorQuantity, Previous = PreviousDenominatorQuantity, PreviousN = PreviousNDenominatorQuantity , CurrentQ = CurrentNumeratorQuantity, PreviousQ = PreviousNumeratorQuantity, PreviousNQ = PreviousNNumeratorQuantity,  Change = CurrentNumeratorQuantity-PreviousNumeratorQuantity
+    | extend C_ID = SolutionType, C_Name = SolutionType
+    | where SupportTopicL2 contains '{category}'
+    | where SupportTopicL3 contains '{supportTopic}'
+    | where (DerivedProductIDStr == @'{pesId}')
+    | where C_ID != ''
+    | summarize C_Name=any(C_Name), Current= sum(Current), Previous = sum(Previous), PreviousN = sum(PreviousN), CurrentQ = sum(CurrentNumeratorQuantity), PreviousQ = sum(PreviousNumeratorQuantity), PreviousNQ = sum(PreviousNNumeratorQuantity) by C_ID | extend Change = Current - Previous
+    | extend CurPer = iff(Current == 0, todouble(''), CurrentQ/Current), PrevPer = iff(Previous == 0, todouble(''), PreviousQ/Previous), NPrevPer = iff(PreviousN == 0, todouble(''), PreviousNQ/PreviousN)
+    | order by Current desc, Previous desc, PreviousN desc
+    | limit 100
+    | project C_ID, C_Name = iif(isempty(C_Name),C_ID,C_Name), Current, CurPer, Previous, PrevPer, Change, PreviousN, NPrevPer
+    | order by Current desc, Previous desc, PreviousN desc
+    | project SolutionName = C_Name, CurrentMonthlyDeflection = round(CurPer*100.0,2), CurrentMonthlyNumerator = bin(CurPer * Current, 1), CurrentMonthlyDenominator = bin(Current, 1), PreviousMonthlyDeflection = round(PrevPer *100.0,2), PreviousMonthlyNumerator = bin(PrevPer * Previous, 1), PreviousMonthlyDenominator = bin(Previous,1)
+    )
+    on SolutionName
+    | project-away SolutionName1
+    ";
+}
+
+
+private static string GetOverallDeflectionMarkDownString(DataTable table)
+{
+    // table schema: InsightTitle, InsightStatus, ShowedCount, HitCount
+    // Dictionary value list will be: 0: InsightTitle, 1: InsightStatus, 2: ShowedCount, 3, HitCount
+    Dictionary<string, string[]> allhash = new Dictionary<string, string[]>();
+
+    if (table.Rows.Count == 0) {
+        return "";
+    }
+    
+    var dicSort = from objDic in allhash select objDic;
+    string markdown = @"<markdown>";
+
+        for (int i = 0; i < table.Rows.Count; i++)
+        {
+            // string hashkey = table.Rows[i]["SolutionName"].ToString();
+            // allhash[hashkey] = new string[4];
+            // for (int j = 1; j < table.Columns.Count; j+=3)
+            // {
+            //     allhash[hashkey][j/3] = "";
+            //     if (j+2 < table.Columns.Count) {
+            //         string value = table.Rows[i][j].ToString() + "% ";
+            //         value += !String.IsNullOrEmpty(table.Rows[i][j+1].ToString()) && !String.IsNullOrEmpty(table.Rows[i][j+2].ToString()) ? "( " + table.Rows[i][j+1].ToString() + "/" + table.Rows[i][j+2].ToString() + " )" : "";
+            //         allhash[hashkey][j/3] = value;
+            //     }
+            // }
+            
+            string hashkey = table.Rows[i]["SolutionName"].ToString();
+            string cd1 = table.Rows[i]["CurrentWeeklyDeflection"] + "% ";
+            cd1 += !String.IsNullOrEmpty(table.Rows[i]["CurrentWeeklyNumerator"].ToString()) && !String.IsNullOrEmpty(table.Rows[i]["CurrentWeeklyDenominator"].ToString()) ? "( " + table.Rows[i]["CurrentWeeklyNumerator"].ToString() + "/" + table.Rows[i]["CurrentWeeklyDenominator"].ToString() + " )" : "";
+            string cd2 = table.Rows[i]["CurrentMonthlyDeflection"] + "% ";
+            cd1 += !String.IsNullOrEmpty(table.Rows[i]["CurrentMonthlyNumerator"].ToString()) && !String.IsNullOrEmpty(table.Rows[i]["CurrentWMonthlyDenominator"].ToString()) ? "( " + table.Rows[i]["CurrentMonthlyNumerator"].ToString() + "/" + table.Rows[i]["CurrentMonthlyDenominator"].ToString() + " )" : "";
+            
+             markdown += $@"| `{hashkey}` | {cd1} | {cd2} |
+        ";
+
+        }
+
+            markdown += "</markdown>";
+
+    return markdown;
+    
+}
+
+
 private static string GetDeflectionBySolution(string tableName, string pesId, string category, string supportTopic)
 {
     // Table name: SupportProductionDeflectionWeeklyPoPInsightsVer1023 /SupportProductionDeflectionMonthlyPoPInsightsVer1023
+
     return $@"
     cluster('usage360').database('Product360').
     {tableName}
@@ -1135,8 +1425,8 @@ private static string GetDeflectionBySolution(string tableName, string pesId, st
     | limit 100
     | project C_ID, C_Name = iif(isempty(C_Name),C_ID,C_Name), Current, CurPer, Previous, PrevPer, Change, PreviousN, NPrevPer
     | order by Current desc, Previous desc, PreviousN desc
-    | project Id = C_ID, Name = C_Name, Current = CurPer, CurrentNumerator = CurPer * Current, CurrentDenominator = round(Current, 2), Previous = PrevPer, PreviousNumerator = PrevPer * Previous, PreviousDenominator = round(Previous,2), Change, 12WeeksPrior = NPrevPer
-    | project Name , CurrentDeflection = round(Current*100.0,2),  CurrentNumerator, CurrentDenominator , PreviousDeflection = round(Previous *100.0,2),  PreviousNumerator, PreviousDenominator
+    | project Id = C_ID, SolutionName = C_Name, Current = CurPer, CurrentNumerator = CurPer * Current, CurrentDenominator = round(Current, 2), Previous = PrevPer, PreviousNumerator = PrevPer * Previous, PreviousDenominator = round(Previous,2), Change, 12WeeksPrior = NPrevPer
+    | project SolutionName , CurrentDeflection = round(Current*100.0,2),  CurrentNumerator, CurrentDenominator , PreviousDeflection = round(Previous *100.0,2),  PreviousNumerator, PreviousDenominator
     ";
 }
 
