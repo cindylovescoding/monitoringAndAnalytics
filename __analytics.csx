@@ -878,7 +878,11 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     long expandedTimes = 0;
 
     List<Task<DataTable>> deflectionSolutionTasks = new List<Task<DataTable>>();
+
     Dictionary<String, DataTable> deflectionTrendTasksMapping = new Dictionary<String, DataTable>();
+    Dictionary<String, DataTable> deflectionWeeklyTrendMapping = new Dictionary<String, DataTable>();
+    Dictionary<String, DataTable> deflectionMonthlyTrendMapping = new Dictionary<String, DataTable>();
+
     Dictionary<String, DataTable> deflectionSolutionTasksMapping = new Dictionary<String, DataTable>();
     Dictionary<String, String> leakedCaseStringMapping = new Dictionary<String, String>();
 
@@ -940,6 +944,8 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 monthlyDeflectionSumTable = GetDeflectionTable(false, "720h");
                 deflectionSolutionTable = GetDeflectionTable(true, timeRange);
 
+
+                // deflectionWeeklySumTasks and deflectionMonthlySumTasks are used to calculate the total weekly and monthly data summary
                 deflectionWeeklySumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(weeklyDeflectionSumTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
                 deflectionMonthlySumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(monthlyDeflectionSumTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
         //        deflectionSolutionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
@@ -953,7 +959,11 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                     spKey += " - " + supportTopicMapping[fullId].Item4;
                 }
 
-                deflectionTrendTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(weeklyDeflectionTableName, monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+            // Monthly and weekly trend together
+         //       deflectionTrendTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(weeklyDeflectionTableName, monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));    
+                deflectionWeeklyTrendMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopicByTime(weeklyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+                deflectionMonthlyTrendMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopicByTime(monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+               
                 deflectionSolutionTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetOverallDeflectionBySolution(supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
 
                 // Leaked Case query
@@ -1083,32 +1093,35 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     if(supportTopicList != null && supportTopicList.Length > 0) {
         List<Tuple<string, bool, Response>> dropdownData = new List<Tuple<string, bool, Response>>();
-        foreach (KeyValuePair<String, DataTable> kvp in deflectionTrendTasksMapping)
+
+        foreach (KeyValuePair<String, DataTable> kvp in deflectionWeeklyTrendMapping)
+        // Show weekly and monthly trends together here
+       // foreach (KeyValuePair<String, DataTable> kvp in deflectionTrendTasksMapping)
         {
             Response deflectionResponse = new Response();
             var table = kvp.Value;
             if (table != null) {
                 // Converge the start/end point for weekly/monthly deflection
-                int length = table.Rows.Count;
-                int[] indexes = new int[]{0, length-1};
-                if (length-1 > 0) {
-                    for (int i = 0; i < indexes.Length; i++)
-                    {
-                        int index = indexes[i];
-                        var value = (object)null;
+                // int length = table.Rows.Count;
+                // int[] indexes = new int[]{0, length-1};
+                // if (length-1 > 0) {
+                //     for (int i = 0; i < indexes.Length; i++)
+                //     {
+                //         int index = indexes[i];
+                //         var value = (object)null;
 
-                        for (int j = 1; j < table.Columns.Count; j++) {
-                            if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
-                                value = table.Rows[index][j];
-                                break;
-                            }
-                        }
+                //         for (int j = 1; j < table.Columns.Count; j++) {
+                //             if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
+                //                 value = table.Rows[index][j];
+                //                 break;
+                //             }
+                //         }
 
-                        for (int j = 1; j < table.Columns.Count; j++) {
-                            table.Rows[index][j] = value;
-                        }
-                    }
-                }
+                //         for (int j = 1; j < table.Columns.Count; j++) {
+                //             table.Rows[index][j] = value;
+                //         }
+                //     }
+                // }
 
             deflectionResponse.Dataset.Add(new DiagnosticData()
             {
@@ -1123,13 +1136,35 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                         forceY = new int[] { 0, 5 },
                         yAxis = new
                         {
-                            axisLabel = "DeflectionTrend"
+                            axisLabel = "Weekly Deflection"
                         },
                        customizeX = "true"
                     }
                 }
             });
 
+            if (deflectionMonthlyTrendMapping[kvp.Key] != null) {
+                var monthlyTable = deflectionMonthlyTrendMapping[kvp.Key];
+                deflectionResponse.Dataset.Add(new DiagnosticData()
+                {
+                    Table = monthlyTable,
+                    RenderingProperties = new TimeSeriesRendering()
+                    {
+                    //   Title = "Deflection Trend",
+                        GraphType = TimeSeriesType.LineGraph,
+                        GraphOptions = new
+                        {
+                            color = new string[] { "hotpink", "dodgerblue", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
+                            forceY = new int[] { 0, 5 },
+                            yAxis = new
+                            {
+                                axisLabel = "Monthly Deflection"
+                            },
+                        customizeX = "true"
+                        }
+                    }
+                });
+            }
 
              //  Deflection by solution table
             if (deflectionSolutionTasksMapping[kvp.Key] != null) {
@@ -1399,12 +1434,14 @@ private static string GetDeflectionBySolution(string tableName, string pesId, st
     ";
 }
 
-private static string GetDeflectionBySuppportTopic1(string tableName, string pesId, string category, string supportTopic)
+
+// Individually calculating weekly/monthly deflection trend
+private static string GetDeflectionBySuppportTopicByTime(string tableName, string pesId, string category, string supportTopic)
 {
     return $@"
     cluster('usage360').database('Product360').
     {tableName}
-    | where Timestamp >= ago(150d)
+    | where Timestamp >= ago(300d)
     | where DerivedProductIDStr in ('{pesId}')
     | where SupportTopicL2 contains '{category}'
     | where SupportTopicL3 contains '{supportTopic}'
