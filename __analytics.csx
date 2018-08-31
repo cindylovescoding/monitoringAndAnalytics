@@ -1180,7 +1180,7 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
                 
                 if (leakedCaseStringMapping[kvp.Key] != null) {
                     string url = leakedCaseStringMapping[kvp.Key];
-                    string urlMarkdown = $@"<a href={url} target='_blank'> Cases Query</a>";
+                    string urlMarkdown = $@"<a href={url} target='_blank'> Cases Query (Last {timeRange})</a>";
                     insightbody.Add("Leaked cases", urlMarkdown);
                 }
 
