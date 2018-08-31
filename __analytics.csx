@@ -877,7 +877,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
     string criticalInsightsCount = "0";
     long expandedTimes = 0;
 
-    List<Task<DataTable>> deflectionTrendTasks = new List<Task<DataTable>>();
     List<Task<DataTable>> deflectionSolutionTasks = new List<Task<DataTable>>();
     Dictionary<String, DataTable> deflectionTrendTasksMapping = new Dictionary<String, DataTable>();
     Dictionary<String, DataTable> deflectionSolutionTasksMapping = new Dictionary<String, DataTable>();
@@ -943,7 +942,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
                 deflectionWeeklySumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(weeklyDeflectionSumTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
                 deflectionMonthlySumTasks.Add(dp.Kusto.ExecuteClusterQuery(GetTotalDeflectionQuery(monthlyDeflectionSumTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
-                deflectionTrendTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(weeklyDeflectionTableName, monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
         //        deflectionSolutionTasks.Add(dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4)));
             //    deflectionSolutionTasksMapping.Add((supportTopicMapping[fullId].Item2, dp.Kusto.ExecuteClusterQuery(GetDeflectionBySolution(deflectionSolutionTable, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4))));
                 string spKey = " [" + supportTopicMapping[fullId].Item2 + "] ";
@@ -1240,85 +1238,6 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
     if (internalChildDetectors.Rows.Count > 0 || externalChildDetectors.Rows.Count > 0) {
         res.AddInsight(allDetectors);
-    }
-
-    // Not working part:
-
-    if(supportTopicList != null && supportTopicList.Length > 0) {
-
-        var deflectionTrendList = await Task.WhenAll(deflectionTrendTasks);
-
-        if (deflectionTrendList != null && deflectionTrendList.Length > 0)
-        {
-            foreach(var table in deflectionTrendList)
-            {
-               int length = table.Rows.Count;
-               int[] indexes = new int[]{0, length-1};
-               if (length-1 > 0) {
-                    for (int i = 0; i < indexes.Length; i++)
-                    {
-                        int index = indexes[i];
-                        var value = (object)null;
-
-                        for (int j = 1; j < table.Columns.Count; j++) {
-                          if (table.Rows[index][j] != null &&  table.Rows[index][j] != System.DBNull.Value) {
-                                value = table.Rows[index][j];
-                                break;
-                            }
-                        }
-
-                        for (int j = 1; j < table.Columns.Count; j++) {
-                            table.Rows[index][j] = value;
-                        }
-                    }
-               }
-  
-                var deflectionTrendTableRendering = new DiagnosticData()
-                {
-                    Table = table,
-                     //  RenderingProperties = new Rendering(RenderingType.Table)
-                    RenderingProperties = new TimeSeriesRendering()
-                    {
-                        Title = "Deflection Trend",
-                        GraphType = TimeSeriesType.LineGraph,
-                        GraphOptions = new
-                        {
-                            color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
-                            forceY = new int[] { 0, 5 },
-                            yAxis = new
-                            {
-                                axisLabel = "DeflectionTrend"
-                            },
-                            customizeX = "true"
-                        }
-                    }
-                };
-                var deflectionTrendTableRendering1 = new DiagnosticData()
-                {
-                    Table = table,
-                       RenderingProperties = new Rendering(RenderingType.Table)
-                    // RenderingProperties = new TimeSeriesRendering()
-                    // {
-                    //     Title = "Deflection Trend",
-                    //     GraphType = TimeSeriesType.LineGraph,
-                    //     GraphOptions = new
-                    //     {
-                    //         color = new string[] { "dodgerblue", "hotpink", "#107E7D", "#8A2BE2", "#D2691E", "#008B8B", "#4298f4", "rgb(55, 175, 49)" },
-                    //         forceY = new int[] { 0, 5 },
-                    //         yAxis = new
-                    //         {
-                    //             axisLabel = "DeflectionTrend"
-                    //         }
-                    //     }
-                    // }
-                    // RenderingProperties = new Rendering(RenderingType.Table){
-                    //     Title = "Exceptions"
-                    // }
-                };
-            //    res.Dataset.Add(deflectionTrendTableRendering);
-             //   res.Dataset.Add(deflectionTrendTableRendering1);
-            }
-        }
     }
 
     res.AddInsight(InsightStatus.Success, "⭐ Detector Rating coming soon");
