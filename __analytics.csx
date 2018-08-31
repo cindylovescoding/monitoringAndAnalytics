@@ -961,8 +961,8 @@ public async static Task<Response> Run(DataProviders dp, Dictionary<string, dyna
 
             // Monthly and weekly trend together
          //       deflectionTrendTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopic(weeklyDeflectionTableName, monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));    
-                deflectionWeeklyTrendMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopicByTime(weeklyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
-                deflectionMonthlyTrendMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopicByTime(monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+                deflectionWeeklyTrendMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopicByWeek(weeklyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
+                deflectionMonthlyTrendMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetDeflectionBySuppportTopicByMonth(monthlyDeflectionTableName, supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
                
                 deflectionSolutionTasksMapping[spKey] = await dp.Kusto.ExecuteClusterQuery(GetOverallDeflectionBySolution(supportTopicMapping[fullId].Item1, supportTopicMapping[fullId].Item3, supportTopicMapping[fullId].Item4));
 
@@ -1436,7 +1436,7 @@ private static string GetDeflectionBySolution(string tableName, string pesId, st
 
 
 // Individually calculating weekly/monthly deflection trend
-private static string GetDeflectionBySuppportTopicByTime(string tableName, string pesId, string category, string supportTopic)
+private static string GetDeflectionBySuppportTopicByWeek(string tableName, string pesId, string category, string supportTopic)
 {
     return $@"
     cluster('usage360').database('Product360').
@@ -1447,7 +1447,23 @@ private static string GetDeflectionBySuppportTopicByTime(string tableName, strin
     | where SupportTopicL3 contains '{supportTopic}'
     | where DenominatorQuantity != 0 
     | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity), auxQty = sum(DenominatorQuantity) by Timestamp, ProductName
-    | project Timestamp , deflection = round(100 * qty, 2)
+    | project Timestamp , WeeklyDeflection = round(100 * qty, 2)
+    | sort by Timestamp asc
+    ";
+}
+
+private static string GetDeflectionBySuppportTopicByMonth(string tableName, string pesId, string category, string supportTopic)
+{
+    return $@"
+    cluster('usage360').database('Product360').
+    {tableName}
+    | where Timestamp >= ago(300d)
+    | where DerivedProductIDStr in ('{pesId}')
+    | where SupportTopicL2 contains '{category}'
+    | where SupportTopicL3 contains '{supportTopic}'
+    | where DenominatorQuantity != 0 
+    | summarize qty = sum(NumeratorQuantity) / sum(DenominatorQuantity), auxQty = sum(DenominatorQuantity) by Timestamp, ProductName
+    | project Timestamp , MonthlyDeflection = round(100 * qty, 2)
     | sort by Timestamp asc
     ";
 }
